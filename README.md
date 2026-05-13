@@ -38,3 +38,4 @@ npm run firebase:emulators
 - `src/lib/firebase/admin.js`: server-side Firebase Admin singleton.
 - `src/context/FirebaseContext.jsx`: React provider and `useFirebase()` hook.
 - `functions/src/index.ts`: Cloud Functions entry points.
+# VideoAssessmentPlatform
