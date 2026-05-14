@@ -1,0 +1,21 @@
+
+> video-assessment-platform@0.1.0 dev
+> next dev --hostname 127.0.0.1 --port 3000
+
+▲ Next.js 16.2.6 (Turbopack)
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+- Environments: .env
+✓ Ready in 727ms
+Creating turbopack project { dir: 'C:\\Users\\dunca\\VideoAssessmentPlatform', testMode: true }
+
+ GET / 200 in 623ms (next.js: 207ms, application-code: 416ms)
+ GET /login 404 in 111ms (next.js: 38ms, application-code: 73ms)
+ GET /login 404 in 51ms (next.js: 7ms, application-code: 44ms)
+ GET / 200 in 57ms (next.js: 7ms, application-code: 50ms)
+ GET / 200 in 55ms (next.js: 4ms, application-code: 51ms)
+✓ Compiled in 303ms
+ GET / 200 in 896ms (next.js: 218ms, application-code: 678ms)
+ GET / 200 in 116ms (next.js: 13ms, application-code: 103ms)
+ GET / 200 in 659ms (next.js: 5ms, application-code: 654ms)
+ GET / 200 in 54ms (next.js: 4ms, application-code: 50ms)

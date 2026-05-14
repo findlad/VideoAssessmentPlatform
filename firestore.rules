@@ -2,13 +2,114 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isServerTimestamp(fieldName) {
+      return request.resource.data[fieldName] == request.time;
+    }
+
+    function isValidEmail(value) {
+      return value is string
+        && value.size() >= 3
+        && value.size() <= 320
+        && value.matches('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$');
+    }
+
+    function hasOnlyQuestionRequestFields() {
+      return request.resource.data.keys().hasOnly([
+        'targetEmail',
+        'questions',
+        'questionCount',
+        'status',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function isValidQuestionRequest() {
+      return hasOnlyQuestionRequestFields()
+        && isValidEmail(request.resource.data.targetEmail)
+        && request.resource.data.questions is list
+        && request.resource.data.questions.size() > 0
+        && request.resource.data.questions.size() <= 5
+        && request.resource.data.questionCount == request.resource.data.questions.size()
+        && request.resource.data.status == 'requested'
+        && isServerTimestamp('createdAt')
+        && isServerTimestamp('updatedAt');
+    }
+
+    function hasOnlyMailFields() {
+      return request.resource.data.keys().hasOnly([
+        'to',
+        'metadata',
+        'message',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function hasValidMailMetadata() {
+      return request.resource.data.metadata.keys().hasOnly([
+        'type',
+        'fileName',
+        'questionFileId',
+        'targetEmail',
+        'questionCount',
+        'interviewLink'
+      ])
+        && request.resource.data.metadata.type == 'interview-request'
+        && request.resource.data.metadata.fileName is string
+        && request.resource.data.metadata.fileName == request.resource.data.metadata.questionFileId
+        && isValidEmail(request.resource.data.metadata.targetEmail)
+        && request.resource.data.metadata.questionCount is int
+        && request.resource.data.metadata.questionCount > 0
+        && request.resource.data.metadata.questionCount <= 5
+        && request.resource.data.metadata.interviewLink is string;
+    }
+
+    function hasValidMailMessage() {
+      return request.resource.data.message.keys().hasOnly([
+        'subject',
+        'text',
+        'html'
+      ])
+        && request.resource.data.message.subject is string
+        && request.resource.data.message.text is string
+        && request.resource.data.message.html is string;
+    }
+
+    function isValidMailRequest() {
+      return hasOnlyMailFields()
+        && request.resource.data.to is list
+        && request.resource.data.to.size() == 1
+        && isValidEmail(request.resource.data.to[0])
+        && request.resource.data.metadata is map
+        && request.resource.data.message is map
+        && hasValidMailMetadata()
+        && hasValidMailMessage()
+        && isServerTimestamp('createdAt')
+        && isServerTimestamp('updatedAt');
+    }
+
     match /users/{userId} {
-      allow read, update, delete: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId;
+      allow read, update, delete: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn() && request.auth.uid == userId;
     }
 
     match /assessments/{assessmentId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isSignedIn();
+    }
+
+    match /questions/{questionId} {
+      allow create: if isValidQuestionRequest();
+      allow read, update, delete: if false;
+    }
+
+    match /mail/{mailId} {
+      allow create: if isValidMailRequest();
+      allow read, update, delete: if false;
     }
 
     match /{document=**} {
