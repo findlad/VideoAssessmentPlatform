@@ -19,9 +19,12 @@ service cloud.firestore {
 
     function hasOnlyQuestionRequestFields() {
       return request.resource.data.keys().hasOnly([
+        'createdBy',
+        'createdByEmail',
         'targetEmail',
         'questions',
         'questionCount',
+        'responseCount',
         'status',
         'createdAt',
         'updatedAt'
@@ -29,19 +32,61 @@ service cloud.firestore {
     }
 
     function isValidQuestionRequest() {
-      return hasOnlyQuestionRequestFields()
+      return isSignedIn()
+        && hasOnlyQuestionRequestFields()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdByEmail is string
         && isValidEmail(request.resource.data.targetEmail)
         && request.resource.data.questions is list
         && request.resource.data.questions.size() > 0
         && request.resource.data.questions.size() <= 5
         && request.resource.data.questionCount == request.resource.data.questions.size()
+        && request.resource.data.responseCount == 0
         && request.resource.data.status == 'requested'
         && isServerTimestamp('createdAt')
         && isServerTimestamp('updatedAt');
     }
 
+    function isValidQuestionResponseUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['status', 'responseCount', 'updatedAt'])
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.targetEmail == resource.data.targetEmail
+        && request.resource.data.questions == resource.data.questions
+        && request.resource.data.questionCount == resource.data.questionCount
+        && request.resource.data.status in ['in-progress', 'responded']
+        && request.resource.data.responseCount is int
+        && request.resource.data.responseCount > 0
+        && request.resource.data.responseCount <= resource.data.questionCount
+        && isServerTimestamp('updatedAt');
+    }
+
+    function isQuestionOwner(questionId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/questions/$(questionId)).data.createdBy == request.auth.uid;
+    }
+
+    function isValidAnswerMetadata(questionId, answerId) {
+      return request.resource.data.keys().hasOnly([
+        'questionIndex',
+        'question',
+        'storagePath',
+        'contentType',
+        'updatedAt'
+      ])
+        && answerId.matches('answer-[1-5]')
+        && request.resource.data.questionIndex is int
+        && request.resource.data.questionIndex >= 0
+        && request.resource.data.questionIndex < 5
+        && request.resource.data.question is string
+        && request.resource.data.storagePath.matches('^interviewAnswers/' + questionId + '/answer-[1-5]\\.(webm|mp4)$')
+        && request.resource.data.contentType.matches('^video/.*')
+        && isServerTimestamp('updatedAt');
+    }
+
     function hasOnlyMailFields() {
       return request.resource.data.keys().hasOnly([
+        'from',
         'to',
         'metadata',
         'message',
@@ -82,6 +127,7 @@ service cloud.firestore {
 
     function isValidMailRequest() {
       return hasOnlyMailFields()
+        && (!request.resource.data.keys().hasAny(['from']) || isValidEmail(request.resource.data.from))
         && request.resource.data.to is list
         && request.resource.data.to.size() == 1
         && isValidEmail(request.resource.data.to[0])
@@ -104,7 +150,16 @@ service cloud.firestore {
 
     match /questions/{questionId} {
       allow create: if isValidQuestionRequest();
-      allow read, update, delete: if false;
+      allow get: if true;
+      allow list: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+      allow update: if isValidQuestionResponseUpdate();
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
+
+      match /answers/{answerId} {
+        allow create, update: if isValidAnswerMetadata(questionId, answerId);
+        allow read: if isQuestionOwner(questionId);
+        allow delete: if isQuestionOwner(questionId);
+      }
     }
 
     match /mail/{mailId} {

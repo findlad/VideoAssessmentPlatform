@@ -1,5 +1,5 @@
-import { NewInterviewLanding } from "@/components/NewInterviewLanding";
+import { NewInterviewRequestLanding } from "@/components/NewInterviewRequestLanding";
 
 export default function Home() {
-  return <NewInterviewLanding />;
+  return <NewInterviewRequestLanding />;
 }

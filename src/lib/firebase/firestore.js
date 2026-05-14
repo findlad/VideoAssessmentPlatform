@@ -5,9 +5,12 @@ import {
   doc,
   getDoc,
   getDocs,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
-  updateDoc
+  updateDoc,
+  where
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 
@@ -50,6 +53,24 @@ export async function readCollection(path) {
     id: item.id,
     ...item.data()
   }));
+}
+
+export async function queryDocuments(path, constraints = []) {
+  const queryRef = query(collectionRef(path), ...constraints);
+  const snapshot = await getDocs(queryRef);
+
+  return snapshot.docs.map((item) => ({
+    id: item.id,
+    ...item.data()
+  }));
+}
+
+export function whereEquals(field, value) {
+  return where(field, "==", value);
+}
+
+export function orderByField(field, direction = "asc") {
+  return orderBy(field, direction);
 }
 
 export async function writeDocument(path, id, data, options = { merge: true }) {
