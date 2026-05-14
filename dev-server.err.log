@@ -1010,3 +1010,7 @@ https://react.dev/link/hydration-mismatch
           ...
  
 [browser] [locatorjs]: ok (chrome-extension://npbfdllefekhdplbkdigpncggmojpefi/hook.bundle.js:1:36200)
+[browser] [locator-js] React instance (react-server-dom-turbopack v19.3.0-experimental-3f0b9e61-20260317) is not supported (chrome-extension://npbfdllefekhdplbkdigpncggmojpefi/hook.bundle.js:1:27759)
+[browser] [locator-js] React instance (react-dom v19.3.0-canary-3f0b9e61-20260317) is not supported (chrome-extension://npbfdllefekhdplbkdigpncggmojpefi/hook.bundle.js:1:27759)
+[browser] [locatorjs]: ok (chrome-extension://npbfdllefekhdplbkdigpncggmojpefi/hook.bundle.js:1:36200)
+[browser] [locatorjs]: ok (chrome-extension://npbfdllefekhdplbkdigpncggmojpefi/hook.bundle.js:1:36200)
