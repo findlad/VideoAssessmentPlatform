@@ -2,6 +2,9 @@
 
 Next.js app with Firebase client integration, Firestore, Firebase Admin support for server code, and Cloud Functions.
 
+Deployed to:
+https://videoassessmentplatform--videoassessmentplatform.us-central1.hosted.app/
+
 ## Setup
 
 1. Install dependencies:
