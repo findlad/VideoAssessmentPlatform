@@ -21,8 +21,12 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly([
         'createdBy',
         'createdByEmail',
+        'interviewTitle',
+        'intervieweeName',
+        'requesterName',
         'targetEmail',
         'questions',
+        'questionSettings',
         'questionCount',
         'responseCount',
         'status',
@@ -36,10 +40,15 @@ service cloud.firestore {
         && hasOnlyQuestionRequestFields()
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdByEmail is string
+        && request.resource.data.interviewTitle is string
         && isValidEmail(request.resource.data.targetEmail)
+        && request.resource.data.intervieweeName is string
+        && request.resource.data.requesterName is string
         && request.resource.data.questions is list
         && request.resource.data.questions.size() > 0
-        && request.resource.data.questions.size() <= 5
+        && request.resource.data.questions.size() <= 6
+        && request.resource.data.questionSettings is list
+        && request.resource.data.questionSettings.size() == request.resource.data.questions.size()
         && request.resource.data.questionCount == request.resource.data.questions.size()
         && request.resource.data.responseCount == 0
         && request.resource.data.status == 'requested'
@@ -70,17 +79,41 @@ service cloud.firestore {
       return request.resource.data.keys().hasOnly([
         'questionIndex',
         'question',
+        'attemptsAllowed',
+        'attemptsUsed',
+        'maxDurationSeconds',
         'storagePath',
         'contentType',
         'updatedAt'
       ])
-        && answerId.matches('answer-[1-5]')
+        && answerId.matches('answer-[1-6]')
         && request.resource.data.questionIndex is int
         && request.resource.data.questionIndex >= 0
-        && request.resource.data.questionIndex < 5
+        && request.resource.data.questionIndex < 6
         && request.resource.data.question is string
-        && request.resource.data.storagePath.matches('^interviewAnswers/' + questionId + '/answer-[1-5]\\.(webm|mp4)$')
+        && request.resource.data.attemptsAllowed is int
+        && request.resource.data.attemptsAllowed >= 1
+        && request.resource.data.attemptsUsed is int
+        && request.resource.data.attemptsUsed >= 1
+        && request.resource.data.attemptsUsed <= request.resource.data.attemptsAllowed
+        && request.resource.data.maxDurationSeconds is int
+        && request.resource.data.maxDurationSeconds >= 1
+        && request.resource.data.storagePath.matches('^interviewAnswers/' + questionId + '/answer-[1-6]\\.(webm|mp4)$')
         && request.resource.data.contentType.matches('^video/.*')
+        && isServerTimestamp('updatedAt');
+    }
+
+    function isValidAnswerReviewUpdate(questionId) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isQuestionOwner(questionId)
+        && changed.hasOnly(['reviewRating', 'reviewNotes', 'updatedAt'])
+        && (!changed.hasAny(['reviewRating'])
+          || (request.resource.data.reviewRating is int
+            && request.resource.data.reviewRating >= 1
+            && request.resource.data.reviewRating <= 10))
+        && (!changed.hasAny(['reviewNotes'])
+          || (request.resource.data.reviewNotes is string
+            && request.resource.data.reviewNotes.size() <= 5000))
         && isServerTimestamp('updatedAt');
     }
 
@@ -100,6 +133,9 @@ service cloud.firestore {
         'type',
         'fileName',
         'questionFileId',
+        'interviewTitle',
+        'intervieweeName',
+        'requesterName',
         'targetEmail',
         'questionCount',
         'interviewLink'
@@ -107,10 +143,13 @@ service cloud.firestore {
         && request.resource.data.metadata.type == 'interview-request'
         && request.resource.data.metadata.fileName is string
         && request.resource.data.metadata.fileName == request.resource.data.metadata.questionFileId
+        && request.resource.data.metadata.interviewTitle is string
+        && request.resource.data.metadata.intervieweeName is string
+        && request.resource.data.metadata.requesterName is string
         && isValidEmail(request.resource.data.metadata.targetEmail)
         && request.resource.data.metadata.questionCount is int
         && request.resource.data.metadata.questionCount > 0
-        && request.resource.data.metadata.questionCount <= 5
+        && request.resource.data.metadata.questionCount <= 6
         && request.resource.data.metadata.interviewLink is string;
     }
 
@@ -156,7 +195,9 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
 
       match /answers/{answerId} {
-        allow create, update: if isValidAnswerMetadata(questionId, answerId);
+        allow create: if isValidAnswerMetadata(questionId, answerId);
+        allow update: if isValidAnswerMetadata(questionId, answerId)
+          || isValidAnswerReviewUpdate(questionId);
         allow read: if isQuestionOwner(questionId);
         allow delete: if isQuestionOwner(questionId);
       }

@@ -5,6 +5,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
@@ -63,6 +64,29 @@ export async function queryDocuments(path, constraints = []) {
     id: item.id,
     ...item.data()
   }));
+}
+
+export async function queryFirstDocument(path, constraints = []) {
+  const results = await queryDocuments(path, constraints);
+
+  return results[0] || null;
+}
+
+export function subscribeToDocuments(path, constraints = [], onNext, onError) {
+  const queryRef = query(collectionRef(path), ...constraints);
+
+  return onSnapshot(
+    queryRef,
+    (snapshot) => {
+      onNext(
+        snapshot.docs.map((item) => ({
+          id: item.id,
+          ...item.data()
+        }))
+      );
+    },
+    onError
+  );
 }
 
 export function whereEquals(field, value) {
