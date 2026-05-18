@@ -36,13 +36,24 @@ env:
     value: "false"
 
   # Used by invitation emails and API-created assessment links.
-  # Replace this with the deployed App Hosting URL once you have it.
   - variable: NEXT_PUBLIC_DEPLOYMENT_URL
-    value: ""
+    value: "https://videoassessmentplatform--videoassessmentplatform.us-central1.hosted.app"
 
-  # Used as the sender for invitation and completion emails.
-  - variable: NEXT_PUBLIC_EMAIL_FROM_ADDRESS
-    value: ""
+  # Used as the sender for invitation and completion emails. Uncomment when
+  # your mail extension/provider is configured with this sender.
+  # - variable: NEXT_PUBLIC_EMAIL_FROM_ADDRESS
+  #   value: "no-reply@example.com"
+
+  # First admin bootstrap. Uncomment and set this before first production admin
+  # sign-in if you want automatic admin role creation.
+  # - variable: INITIAL_ADMIN_EMAIL
+  #   value: "admin@example.com"
+
+  # Set this to your admin user's Firebase Auth UID if you want API-created
+  # assessments to appear in that admin dashboard with the current data model.
+  # Uncomment once you know the UID.
+  # - variable: INTAKE_ASSESSMENT_OWNER_UID
+  #   value: "firebase-auth-admin-uid"
 
   # Server-side assessment/API settings.
   - variable: ASSESSMENT_LINK_EXPIRY_DAYS
@@ -51,18 +62,8 @@ env:
   - variable: INTAKE_DUPLICATE_WINDOW_SECONDS
     value: "300"
 
-  # Set this to your admin user's Firebase Auth UID if you want API-created
-  # assessments to appear in that admin dashboard with the current data model.
-  - variable: INTAKE_ASSESSMENT_OWNER_UID
-    value: ""
-
   - variable: VIDEO_SIGNED_URL_TTL_SECONDS
     value: "3600"
-
-  # First admin bootstrap. When this Google account signs in for the first
-  # time, the server creates users/{uid} with role: admin.
-  - variable: INITIAL_ADMIN_EMAIL
-    value: ""
 
   # Grant access to secrets in Cloud Secret Manager.
   # You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.
