@@ -9,6 +9,8 @@ runConfig:
 
 # Environment variables and secrets.
 env:
+  # Firebase web config is public by design. These NEXT_PUBLIC_* values are
+  # bundled into the browser app, so do not put real secrets here.
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
     value: "AIzaSyCp-LFv67YavE16I_aK6YX4reDXVmn8Qls"
 
@@ -27,8 +29,54 @@ env:
   - variable: NEXT_PUBLIC_FIREBASE_APP_ID
     value: "1:162889759838:web:6d666b300fe51846adc8cf"
 
+  - variable: NEXT_PUBLIC_FIREBASE_FUNCTIONS_REGION
+    value: "us-central1"
+
+  - variable: NEXT_PUBLIC_USE_FIREBASE_EMULATORS
+    value: "false"
+
+  # Used by invitation emails and API-created assessment links.
+  # Replace this with the deployed App Hosting URL once you have it.
+  - variable: NEXT_PUBLIC_DEPLOYMENT_URL
+    value: ""
+
+  # Used as the sender for invitation and completion emails.
+  - variable: NEXT_PUBLIC_EMAIL_FROM_ADDRESS
+    value: ""
+
+  # Server-side assessment/API settings.
+  - variable: ASSESSMENT_LINK_EXPIRY_DAYS
+    value: "7"
+
+  - variable: INTAKE_DUPLICATE_WINDOW_SECONDS
+    value: "300"
+
+  # Set this to your admin user's Firebase Auth UID if you want API-created
+  # assessments to appear in that admin dashboard with the current data model.
+  - variable: INTAKE_ASSESSMENT_OWNER_UID
+    value: ""
+
+  - variable: VIDEO_SIGNED_URL_TTL_SECONDS
+    value: "3600"
+
+  # First admin bootstrap. When this Google account signs in for the first
+  # time, the server creates users/{uid} with role: admin.
+  - variable: INITIAL_ADMIN_EMAIL
+    value: ""
+
   # Grant access to secrets in Cloud Secret Manager.
   # You can create secrets with the CLI command `firebase apphosting:secrets:set <secretName>`.
   # See https://firebase.google.com/docs/app-hosting/configure#secret-parameters
-  # - variable: MY_SECRET
-  #   secret: mySecretRef
+  #
+  # Optional fallback API keys for the external intake API. Prefer generating
+  # API keys from the admin UI, which stores only hashes in Firestore.
+  # - variable: INTAKE_API_KEYS
+  #   secret: intakeApiKeys
+  #
+  # Usually not needed on App Hosting when deploying to the same Firebase
+  # project, because the server can use application default credentials.
+  # Only add these as secrets if application default credentials do not work.
+  # - variable: FIREBASE_CLIENT_EMAIL
+  #   secret: firebaseClientEmail
+  # - variable: FIREBASE_PRIVATE_KEY
+  #   secret: firebasePrivateKey

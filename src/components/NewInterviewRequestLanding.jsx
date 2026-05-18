@@ -20,6 +20,7 @@ import {
   DialogTitle,
   IconButton,
   Chip,
+  MenuItem,
   Table,
   TableBody,
   TableCell,
@@ -40,8 +41,8 @@ import {
   whereEquals,
 } from "@/lib/firebase/firestore";
 import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
   signOut,
 } from "firebase/auth";
 import { useFirebase } from "@/context/FirebaseContext";
@@ -56,6 +57,8 @@ const DEFAULT_ATTEMPTS_ALLOWED = 1;
 const DEFAULT_MAX_DURATION_SECONDS = 60;
 const MAX_DURATION_MINUTES = 5;
 const MAX_QUESTIONS = 6;
+const REVIEWABLE_STATUSES = ["completed", "responded", "reviewed"];
+const PLAYBACK_SPEEDS = [0.5, 1, 1.25, 1.5, 2, 2.5, 3];
 
 const initialQuestions = Array.from(
   { length: DEFAULT_QUESTION_COUNT },
@@ -105,6 +108,94 @@ async function downloadUrlAsFile(url, fileName) {
   window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
 }
 
+function getTimestampMillis(value) {
+  if (!value) {
+    return 0;
+  }
+
+  if (typeof value.toMillis === "function") {
+    return value.toMillis();
+  }
+
+  const parsed = new Date(value).getTime();
+
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function formatTimestamp(value) {
+  const millis = getTimestampMillis(value);
+
+  return millis ? new Date(millis).toLocaleString() : "Not submitted";
+}
+
+function getInterviewStatus(interview) {
+  const responseCount = interview.responseCount || 0;
+
+  if (
+    interview.status === "reviewed" ||
+    interview.status === "expired" ||
+    interview.status === "in-progress" ||
+    interview.status === "completed" ||
+    interview.status === "responded"
+  ) {
+    return interview.status;
+  }
+
+  if (responseCount >= interview.questionCount) {
+    return "completed";
+  }
+
+  return interview.status === "invited" ? "invited" : "invited";
+}
+
+function getStatusLabel(status) {
+  const labels = {
+    invited: "Invited",
+    "in-progress": "In progress",
+    completed: "Completed",
+    responded: "Completed",
+    reviewed: "Reviewed",
+    expired: "Expired",
+  };
+
+  return labels[status] || "Invited";
+}
+
+function getStatusColor(status) {
+  if (status === "reviewed") {
+    return "success";
+  }
+
+  if (status === "completed" || status === "responded") {
+    return "primary";
+  }
+
+  if (status === "in-progress") {
+    return "warning";
+  }
+
+  if (status === "expired") {
+    return "error";
+  }
+
+  return "default";
+}
+
+function calculateAverageRating(answers) {
+  const ratings = answers
+    .map((answer) => Number(answer.reviewRating))
+    .filter((rating) => Number.isFinite(rating) && rating >= 1);
+
+  if (ratings.length === 0) {
+    return null;
+  }
+
+  return Number(
+    (ratings.reduce((total, rating) => total + rating, 0) / ratings.length)
+      .toFixed(1),
+  );
+}
+
 export function NewInterviewRequestLanding() {
   const { auth, authLoading, user } = useFirebase();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -115,9 +206,12 @@ export function NewInterviewRequestLanding() {
   const [selectedAnswers, setSelectedAnswers] = useState([]);
   const [savingReviewId, setSavingReviewId] = useState("");
   const [savingNotesId, setSavingNotesId] = useState("");
+  const [markingReviewed, setMarkingReviewed] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloadingInterviewId, setDownloadingInterviewId] = useState("");
+  const [downloadingAnswerId, setDownloadingAnswerId] = useState("");
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [apiKeys, setApiKeys] = useState([]);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
   const [apiKeyLabel, setApiKeyLabel] = useState("External integration");
@@ -127,9 +221,8 @@ export function NewInterviewRequestLanding() {
   const [revokingApiKeyId, setRevokingApiKeyId] = useState("");
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [interviews, setInterviews] = useState([]);
-  const [authMode, setAuthMode] = useState("login");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
+  const [adminStatus, setAdminStatus] = useState("signed-out");
+  const [adminUser, setAdminUser] = useState(null);
   const [authError, setAuthError] = useState("");
   const [interviewTitle, setInterviewTitle] = useState("");
   const [requesterName, setRequesterName] = useState("");
@@ -139,6 +232,10 @@ export function NewInterviewRequestLanding() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [createdFileId, setCreatedFileId] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [titleFilter, setTitleFilter] = useState("");
+  const [sortBy, setSortBy] = useState("submitted-desc");
 
   const orderedQuestions = useMemo(
     () =>
@@ -165,6 +262,7 @@ export function NewInterviewRequestLanding() {
 
   const canSubmit =
     Boolean(user) &&
+    adminStatus === "authorized" &&
     interviewTitle.trim().length > 0 &&
     requesterName.trim().length > 0 &&
     intervieweeName.trim().length > 0 &&
@@ -172,8 +270,56 @@ export function NewInterviewRequestLanding() {
     orderedQuestions.length > 0 &&
     !submitting;
 
-  async function handleAuthSubmit(event) {
-    event.preventDefault();
+  const visibleInterviews = useMemo(() => {
+    const normalizedTitle = titleFilter.trim().toLowerCase();
+
+    return interviews
+      .filter((interview) => {
+        const status = getInterviewStatus(interview);
+        const source = interview.source || "manual";
+        const title = (interview.interviewTitle || "").toLowerCase();
+
+        return (
+          (statusFilter === "all" || status === statusFilter) &&
+          (sourceFilter === "all" || source === sourceFilter) &&
+          (!normalizedTitle || title.includes(normalizedTitle))
+        );
+      })
+      .sort((first, second) => {
+        if (sortBy === "candidate-asc") {
+          return (first.intervieweeName || "").localeCompare(
+            second.intervieweeName || "",
+          );
+        }
+
+        if (sortBy === "status-asc") {
+          return getStatusLabel(getInterviewStatus(first)).localeCompare(
+            getStatusLabel(getInterviewStatus(second)),
+          );
+        }
+
+        if (sortBy === "score-desc") {
+          return (second.overallScore || 0) - (first.overallScore || 0);
+        }
+
+        if (sortBy === "score-asc") {
+          return (first.overallScore || 0) - (second.overallScore || 0);
+        }
+
+        const firstSubmitted =
+          getTimestampMillis(first.submittedAt) ||
+          getTimestampMillis(first.updatedAt) ||
+          getTimestampMillis(first.createdAt);
+        const secondSubmitted =
+          getTimestampMillis(second.submittedAt) ||
+          getTimestampMillis(second.updatedAt) ||
+          getTimestampMillis(second.createdAt);
+
+        return secondSubmitted - firstSubmitted;
+      });
+  }, [interviews, sortBy, sourceFilter, statusFilter, titleFilter]);
+
+  async function handleGoogleSignIn() {
     setAuthError("");
 
     try {
@@ -181,22 +327,17 @@ export function NewInterviewRequestLanding() {
         throw new Error("Firebase Auth is not initialized.");
       }
 
-      if (authMode === "login") {
-        await signInWithEmailAndPassword(auth, authEmail.trim(), authPassword);
-      } else {
-        await createUserWithEmailAndPassword(
-          auth,
-          authEmail.trim(),
-          authPassword,
-        );
-      }
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({
+        prompt: "select_account",
+      });
 
-      setAuthPassword("");
+      await signInWithPopup(auth, provider);
     } catch (nextError) {
       setAuthError(
         nextError instanceof Error
           ? nextError.message
-          : "Unable to authenticate.",
+          : "Unable to sign in with Google.",
       );
     }
   }
@@ -210,7 +351,7 @@ export function NewInterviewRequestLanding() {
   }, [user]);
 
   const loadApiKeys = useCallback(async () => {
-    if (!user) {
+    if (!user || adminStatus !== "authorized") {
       setApiKeys([]);
       return;
     }
@@ -241,7 +382,7 @@ export function NewInterviewRequestLanding() {
     } finally {
       setApiKeysLoading(false);
     }
-  }, [getAuthToken, user]);
+  }, [adminStatus, getAuthToken, user]);
 
   async function handleCreateApiKey(event) {
     event.preventDefault();
@@ -468,6 +609,12 @@ export function NewInterviewRequestLanding() {
     }
 
     const previousRating = answer.reviewRating;
+    const nextAnswers = selectedAnswers.map((selectedAnswer) =>
+      selectedAnswer.id === answer.id
+        ? { ...selectedAnswer, reviewRating: rating }
+        : selectedAnswer,
+    );
+    const nextOverallScore = calculateAverageRating(nextAnswers);
 
     updateSelectedAnswer(answer.id, { reviewRating: rating });
     setSavingReviewId(answer.id);
@@ -481,6 +628,12 @@ export function NewInterviewRequestLanding() {
           reviewRating: rating,
         },
       );
+      await updateDocument("questions", selectedReviewInterview.id, {
+        overallScore: nextOverallScore,
+      });
+      setSelectedReviewInterview((current) =>
+        current ? { ...current, overallScore: nextOverallScore } : current,
+      );
     } catch (nextError) {
       updateSelectedAnswer(answer.id, { reviewRating: previousRating });
       setError(
@@ -490,6 +643,76 @@ export function NewInterviewRequestLanding() {
       );
     } finally {
       setSavingReviewId("");
+    }
+  }
+
+  async function handleDownloadAnswer(answer) {
+    if (!selectedReviewInterview) {
+      return;
+    }
+
+    setDownloadingAnswerId(answer.id);
+    setError("");
+
+    try {
+      const candidateName = sanitizeFileNamePart(
+        selectedReviewInterview.intervieweeName,
+      );
+      const questionNumber = (answer.questionIndex ?? 0) + 1;
+      const question = sanitizeFileNamePart(
+        answer.question || `Question ${questionNumber}`,
+      );
+      const extension = getAnswerExtension(answer);
+
+      await downloadUrlAsFile(
+        answer.url,
+        `${candidateName} - Question ${questionNumber} - ${question}.${extension}`,
+      );
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to download this video.",
+      );
+    } finally {
+      setDownloadingAnswerId("");
+    }
+  }
+
+  async function handleMarkReviewed() {
+    if (!selectedReviewInterview) {
+      return;
+    }
+
+    setMarkingReviewed(true);
+    setError("");
+
+    try {
+      const nextOverallScore = calculateAverageRating(selectedAnswers);
+
+      await updateDocument("questions", selectedReviewInterview.id, {
+        status: "reviewed",
+        reviewedAt: new Date(),
+        overallScore: nextOverallScore,
+      });
+      setSelectedReviewInterview((current) =>
+        current
+          ? {
+              ...current,
+              status: "reviewed",
+              reviewedAt: new Date(),
+              overallScore: nextOverallScore,
+            }
+          : current,
+      );
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to mark this assessment as reviewed.",
+      );
+    } finally {
+      setMarkingReviewed(false);
     }
   }
 
@@ -521,6 +744,37 @@ export function NewInterviewRequestLanding() {
       );
     } finally {
       setSavingNotesId("");
+    }
+  }
+
+  async function handleMarkAnswerReviewed(answer) {
+    if (!selectedReviewInterview) {
+      return;
+    }
+
+    const previousReviewed = Boolean(answer.responseReviewed);
+
+    updateSelectedAnswer(answer.id, { responseReviewed: true });
+    setSavingReviewId(answer.id);
+    setError("");
+
+    try {
+      await updateDocument(
+        `questions/${selectedReviewInterview.id}/answers`,
+        answer.id,
+        {
+          responseReviewed: true,
+        },
+      );
+    } catch (nextError) {
+      updateSelectedAnswer(answer.id, { responseReviewed: previousReviewed });
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to mark this response as reviewed.",
+      );
+    } finally {
+      setSavingReviewId("");
     }
   }
 
@@ -610,10 +864,66 @@ export function NewInterviewRequestLanding() {
   }
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadAdminStatus() {
+      if (authLoading) {
+        return;
+      }
+
+      if (!user) {
+        setAdminStatus("signed-out");
+        setAdminUser(null);
+        setInterviews([]);
+        setApiKeys([]);
+        return;
+      }
+
+      setAdminStatus("checking");
+      setAuthError("");
+
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch("/api/admin/me", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const body = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(body.error || "This Google account is not an admin.");
+        }
+
+        if (!cancelled) {
+          setAdminUser(body.admin || null);
+          setAdminStatus("authorized");
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setAdminUser(null);
+          setAdminStatus("unauthorized");
+          setAuthError(
+            nextError instanceof Error
+              ? nextError.message
+              : "This Google account is not an admin.",
+          );
+        }
+      }
+    }
+
+    loadAdminStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, user]);
+
+  useEffect(() => {
     let unsubscribe = () => {};
 
     const timer = window.setTimeout(() => {
-      if (!user) {
+      if (!user || adminStatus !== "authorized") {
         setInterviews([]);
         setDashboardLoading(false);
         return;
@@ -649,7 +959,7 @@ export function NewInterviewRequestLanding() {
       window.clearTimeout(timer);
       unsubscribe();
     };
-  }, [loadApiKeys, user]);
+  }, [adminStatus, user]);
 
   useEffect(() => {
     if (!createdFileId) {
@@ -674,7 +984,13 @@ export function NewInterviewRequestLanding() {
     }, 0);
 
     return () => window.clearTimeout(timer);
-  }, [loadApiKeys, user]);
+  }, [adminStatus, loadApiKeys, user]);
+
+  useEffect(() => {
+    document.querySelectorAll("[data-review-video]").forEach((video) => {
+      video.playbackRate = playbackSpeed;
+    });
+  }, [playbackSpeed, selectedAnswers]);
 
   return (
     <Box
@@ -719,8 +1035,6 @@ export function NewInterviewRequestLanding() {
 
           {!user ? (
             <Box
-              component="form"
-              onSubmit={handleAuthSubmit}
               sx={{
                 bgcolor: "#fff",
                 border: "1px solid #d9dee8",
@@ -731,52 +1045,58 @@ export function NewInterviewRequestLanding() {
             >
               <Stack spacing={2}>
                 <Typography component="h2" sx={{ fontSize: "1.35rem" }}>
-                  {authMode === "login" ? "Sign in" : "Create an account"}
+                  Admin sign in
                 </Typography>
                 {authError ? <Alert severity="error">{authError}</Alert> : null}
-                <TextField
-                  label="Email"
-                  type="email"
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                  slotProps={{
-                    htmlInput: {
-                      suppressHydrationWarning: true,
-                    },
-                  }}
-                  required
-                  fullWidth
-                />
-                <TextField
-                  label="Password"
-                  type="password"
-                  value={authPassword}
-                  onChange={(event) => setAuthPassword(event.target.value)}
-                  required
-                  fullWidth
-                />
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-                  <Button
-                    type="submit"
-                    variant="contained"
-                    disabled={authLoading}
-                  >
-                    {authMode === "login" ? "Sign in" : "Create account"}
-                  </Button>
-                  <Button
-                    type="button"
-                    color="inherit"
-                    onClick={() =>
-                      setAuthMode((mode) =>
-                        mode === "login" ? "create" : "login",
-                      )
-                    }
-                  >
-                    {authMode === "login"
-                      ? "Create account"
-                      : "Use existing account"}
-                  </Button>
-                </Stack>
+                <Typography sx={{ color: "#657085" }}>
+                  Sign in with the Google account that has been granted admin
+                  access.
+                </Typography>
+                <Button
+                  type="button"
+                  variant="contained"
+                  disabled={authLoading}
+                  onClick={handleGoogleSignIn}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  Sign in with Google
+                </Button>
+              </Stack>
+            </Box>
+          ) : adminStatus !== "authorized" ? (
+            <Box
+              sx={{
+                bgcolor: "#fff",
+                border: "1px solid #d9dee8",
+                borderRadius: 2,
+                maxWidth: 620,
+                p: 3,
+              }}
+            >
+              <Stack spacing={2}>
+                <Typography component="h2" sx={{ fontSize: "1.35rem" }}>
+                  Checking admin access
+                </Typography>
+                {adminStatus === "checking" ? (
+                  <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+                    <CircularProgress size={20} />
+                    <Typography sx={{ color: "#657085" }}>
+                      Verifying {user.email}
+                    </Typography>
+                  </Stack>
+                ) : (
+                  <Alert severity="error">
+                    {authError || "This Google account is not an admin."}
+                  </Alert>
+                )}
+                <Button
+                  color="inherit"
+                  startIcon={<LogoutIcon />}
+                  onClick={() => signOut(auth)}
+                  sx={{ alignSelf: "flex-start" }}
+                >
+                  Sign out
+                </Button>
               </Stack>
             </Box>
           ) : (
@@ -798,7 +1118,7 @@ export function NewInterviewRequestLanding() {
                   startIcon={<LogoutIcon />}
                   onClick={() => signOut(auth)}
                 >
-                  Sign out
+                  Sign out{adminUser?.email ? ` (${adminUser.email})` : ""}
                 </Button>
               </Stack>
 
@@ -959,9 +1279,63 @@ export function NewInterviewRequestLanding() {
                   bgcolor: "#fff",
                   border: "1px solid #d9dee8",
                   borderRadius: 2,
-                  overflow: "hidden",
+                  p: 3,
                 }}
               >
+                <Stack
+                  direction={{ xs: "column", md: "row" }}
+                  spacing={1.5}
+                  sx={{ mb: 2 }}
+                >
+                  <TextField
+                    label="Filter by title"
+                    value={titleFilter}
+                    onChange={(event) => setTitleFilter(event.target.value)}
+                    size="small"
+                    fullWidth
+                  />
+                  <TextField
+                    label="Status"
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value)}
+                    select
+                    size="small"
+                    sx={{ minWidth: 170 }}
+                  >
+                    <MenuItem value="all">All statuses</MenuItem>
+                    <MenuItem value="invited">Invited</MenuItem>
+                    <MenuItem value="in-progress">In progress</MenuItem>
+                    <MenuItem value="completed">Completed</MenuItem>
+                    <MenuItem value="reviewed">Reviewed</MenuItem>
+                    <MenuItem value="expired">Expired</MenuItem>
+                  </TextField>
+                  <TextField
+                    label="Source"
+                    value={sourceFilter}
+                    onChange={(event) => setSourceFilter(event.target.value)}
+                    select
+                    size="small"
+                    sx={{ minWidth: 150 }}
+                  >
+                    <MenuItem value="all">All sources</MenuItem>
+                    <MenuItem value="manual">Manual</MenuItem>
+                    <MenuItem value="api">API</MenuItem>
+                  </TextField>
+                  <TextField
+                    label="Sort"
+                    value={sortBy}
+                    onChange={(event) => setSortBy(event.target.value)}
+                    select
+                    size="small"
+                    sx={{ minWidth: 210 }}
+                  >
+                    <MenuItem value="submitted-desc">Submission date</MenuItem>
+                    <MenuItem value="candidate-asc">Candidate name</MenuItem>
+                    <MenuItem value="status-asc">Status</MenuItem>
+                    <MenuItem value="score-desc">Score, high to low</MenuItem>
+                    <MenuItem value="score-asc">Score, low to high</MenuItem>
+                  </TextField>
+                </Stack>
                 <TableContainer>
                   <Table>
                     <TableHead>
@@ -969,16 +1343,18 @@ export function NewInterviewRequestLanding() {
                         <TableCell>Title</TableCell>
                         <TableCell>Interviewee</TableCell>
                         <TableCell>Target email</TableCell>
-                        <TableCell>Questions</TableCell>
+                        <TableCell>Source</TableCell>
                         <TableCell>Status</TableCell>
                         <TableCell>Responses</TableCell>
+                        <TableCell>Submitted</TableCell>
+                        <TableCell>Score</TableCell>
                         <TableCell align="right">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {dashboardLoading ? (
                         <TableRow>
-                          <TableCell colSpan={7}>
+                          <TableCell colSpan={9}>
                             <Stack
                               direction="row"
                               spacing={1.5}
@@ -992,17 +1368,26 @@ export function NewInterviewRequestLanding() {
                       ) : null}
                       {!dashboardLoading && interviews.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7}>
+                          <TableCell colSpan={9}>
                             No interviews commissioned yet.
                           </TableCell>
                         </TableRow>
                       ) : null}
-                      {interviews.map((interview) => {
+                      {!dashboardLoading &&
+                      interviews.length > 0 &&
+                      visibleInterviews.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={9}>
+                            No interviews match these filters.
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                      {visibleInterviews.map((interview) => {
                         const responseCount = interview.responseCount || 0;
+                        const status = getInterviewStatus(interview);
                         const responded =
-                          ["completed", "responded", "reviewed"].includes(
-                            interview.status,
-                          ) || responseCount >= interview.questionCount;
+                          REVIEWABLE_STATUSES.includes(status) ||
+                          responseCount >= interview.questionCount;
                         const downloading =
                           downloadingInterviewId === interview.id;
 
@@ -1015,16 +1400,29 @@ export function NewInterviewRequestLanding() {
                               {interview.intervieweeName || "Unknown"}
                             </TableCell>
                             <TableCell>{interview.targetEmail}</TableCell>
-                            <TableCell>{interview.questionCount}</TableCell>
                             <TableCell>
                               <Chip
-                                label={responded ? "Response received" : "Sent"}
-                                color={responded ? "success" : "default"}
+                                label={interview.source === "api" ? "API" : "Manual"}
+                                size="small"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={getStatusLabel(status)}
+                                color={getStatusColor(status)}
                                 size="small"
                               />
                             </TableCell>
                             <TableCell>
                               {responseCount} / {interview.questionCount}
+                            </TableCell>
+                            <TableCell>
+                              {formatTimestamp(interview.submittedAt)}
+                            </TableCell>
+                            <TableCell>
+                              {interview.overallScore
+                                ? `${interview.overallScore}/10`
+                                : "Unscored"}
                             </TableCell>
                             <TableCell align="right">
                               <Stack
@@ -1270,7 +1668,9 @@ export function NewInterviewRequestLanding() {
         fullWidth
         maxWidth="md"
       >
-        <DialogTitle>Interview response</DialogTitle>
+        <DialogTitle>
+          {selectedReviewInterview?.intervieweeName || "Interview response"}
+        </DialogTitle>
         <DialogContent>
           {reviewLoading ? (
             <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
@@ -1279,6 +1679,57 @@ export function NewInterviewRequestLanding() {
             </Stack>
           ) : (
             <Stack spacing={3} sx={{ pt: 1 }}>
+              {selectedReviewInterview ? (
+                <Stack spacing={1}>
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={1}
+                    sx={{ alignItems: { xs: "flex-start", sm: "center" } }}
+                  >
+                    <Chip
+                      label={getStatusLabel(
+                        getInterviewStatus(selectedReviewInterview),
+                      )}
+                      color={getStatusColor(
+                        getInterviewStatus(selectedReviewInterview),
+                      )}
+                      size="small"
+                    />
+                    <Typography sx={{ color: "#657085" }}>
+                      {selectedReviewInterview.interviewTitle || "Untitled"} ·{" "}
+                      {selectedReviewInterview.targetEmail}
+                    </Typography>
+                  </Stack>
+                  <Stack
+                    direction={{ xs: "column", sm: "row" }}
+                    spacing={1.5}
+                    sx={{ alignItems: { xs: "stretch", sm: "center" } }}
+                  >
+                    <TextField
+                      label="Playback speed"
+                      value={playbackSpeed}
+                      onChange={(event) =>
+                        setPlaybackSpeed(Number(event.target.value))
+                      }
+                      select
+                      size="small"
+                      sx={{ maxWidth: 190 }}
+                    >
+                      {PLAYBACK_SPEEDS.map((speed) => (
+                        <MenuItem key={speed} value={speed}>
+                          {speed}x
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    <Typography sx={{ color: "#657085" }}>
+                      Overall score:{" "}
+                      {selectedReviewInterview.overallScore
+                        ? `${selectedReviewInterview.overallScore}/10`
+                        : "Unscored"}
+                    </Typography>
+                  </Stack>
+                </Stack>
+              ) : null}
               {selectedAnswers.length === 0 ? (
                 <Alert severity="info">No uploaded answers were found.</Alert>
               ) : null}
@@ -1293,6 +1744,15 @@ export function NewInterviewRequestLanding() {
                   <Box
                     component="video"
                     controls
+                    data-review-video
+                    onLoadedMetadata={(event) => {
+                      event.currentTarget.playbackRate = playbackSpeed;
+                    }}
+                    onRateChange={(event) => {
+                      if (event.currentTarget.playbackRate !== playbackSpeed) {
+                        event.currentTarget.playbackRate = playbackSpeed;
+                      }
+                    }}
                     src={answer.url}
                     sx={{
                       bgcolor: "#0f172a",
@@ -1353,6 +1813,21 @@ export function NewInterviewRequestLanding() {
                           : "No rating selected."}
                       </Typography>
                     </Box>
+                    <Button
+                      variant="outlined"
+                      startIcon={
+                        downloadingAnswerId === answer.id ? (
+                          <CircularProgress color="inherit" size={16} />
+                        ) : (
+                          <FileDownloadOutlinedIcon />
+                        )
+                      }
+                      onClick={() => handleDownloadAnswer(answer)}
+                      disabled={downloadingAnswerId === answer.id}
+                      sx={{ alignSelf: "flex-start" }}
+                    >
+                      Download video
+                    </Button>
                     <TextField
                       label="Notes"
                       value={answer.reviewNotes || ""}
@@ -1363,18 +1838,33 @@ export function NewInterviewRequestLanding() {
                       minRows={3}
                       fullWidth
                     />
-                    <Button
-                      variant="outlined"
-                      onClick={() => handleSaveReviewNotes(answer)}
-                      disabled={savingNotesId === answer.id}
-                      sx={{ alignSelf: "flex-start" }}
-                    >
-                      {savingNotesId === answer.id ? (
-                        <CircularProgress color="inherit" size={18} />
-                      ) : (
-                        "Save notes"
-                      )}
-                    </Button>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                      <Button
+                        variant="outlined"
+                        onClick={() => handleSaveReviewNotes(answer)}
+                        disabled={savingNotesId === answer.id}
+                        sx={{ alignSelf: "flex-start" }}
+                      >
+                        {savingNotesId === answer.id ? (
+                          <CircularProgress color="inherit" size={18} />
+                        ) : (
+                          "Save notes"
+                        )}
+                      </Button>
+                      <Button
+                        color={answer.responseReviewed ? "success" : "primary"}
+                        variant={answer.responseReviewed ? "contained" : "outlined"}
+                        onClick={() => handleMarkAnswerReviewed(answer)}
+                        disabled={
+                          answer.responseReviewed || savingReviewId === answer.id
+                        }
+                        sx={{ alignSelf: "flex-start" }}
+                      >
+                        {answer.responseReviewed
+                          ? "Response reviewed"
+                          : "Mark response reviewed"}
+                      </Button>
+                    </Stack>
                   </Stack>
                 </Box>
               ))}
@@ -1382,6 +1872,22 @@ export function NewInterviewRequestLanding() {
           )}
         </DialogContent>
         <DialogActions>
+          <Button
+            color="success"
+            variant="contained"
+            disabled={
+              markingReviewed ||
+              !selectedReviewInterview ||
+              getInterviewStatus(selectedReviewInterview) === "reviewed"
+            }
+            onClick={handleMarkReviewed}
+          >
+            {markingReviewed ? (
+              <CircularProgress color="inherit" size={18} />
+            ) : (
+              "Mark reviewed"
+            )}
+          </Button>
           <Button
             onClick={() => {
               setReviewOpen(false);

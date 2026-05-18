@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import crypto from "node:crypto";
 import { getAdminServices } from "@/lib/firebase/admin";
+import { getBearerToken, requireAdminUser } from "@/lib/api/admin-auth";
 
 const MAX_QUESTIONS = 6;
 const DEFAULT_ATTEMPTS_ALLOWED = 1;
@@ -76,13 +77,6 @@ function normalizeQuestions(value) {
     .filter((question) => question.text);
 }
 
-function getBearerToken(request) {
-  const authorization = request.headers.get("authorization") || "";
-  const [scheme, token] = authorization.split(" ");
-
-  return scheme.toLowerCase() === "bearer" ? token : "";
-}
-
 export async function POST(request) {
   try {
     const token = getBearerToken(request);
@@ -94,8 +88,16 @@ export async function POST(request) {
       );
     }
 
-    const { auth, db } = getAdminServices();
-    const decodedToken = await auth.verifyIdToken(token);
+    const adminUser = await requireAdminUser(request);
+
+    if (!adminUser) {
+      return NextResponse.json(
+        { error: "You must be an admin to create interview requests." },
+        { status: 403 },
+      );
+    }
+
+    const { db } = getAdminServices();
     const body = await request.json();
     const interviewTitle = normalizeText(body.interviewTitle);
     const requesterName = normalizeText(body.requesterName);
@@ -134,8 +136,8 @@ export async function POST(request) {
     );
     const requestRef = await db.collection("questions").add({
       accessToken,
-      createdBy: decodedToken.uid,
-      createdByEmail: decodedToken.email || "",
+      createdBy: adminUser.uid,
+      createdByEmail: adminUser.email || "",
       interviewTitle,
       requesterName,
       intervieweeName,

@@ -1,4 +1,9 @@
-import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import {
+  deleteObject,
+  getDownloadURL,
+  ref,
+  uploadBytesResumable,
+} from "firebase/storage";
 import { storage } from "@/lib/firebase/client";
 
 function requireStorage() {
@@ -9,7 +14,12 @@ function requireStorage() {
   return storage;
 }
 
-export async function uploadInterviewAnswer(fileName, questionIndex, blob) {
+export async function uploadInterviewAnswer(
+  fileName,
+  questionIndex,
+  blob,
+  options = {},
+) {
   const answerNumber = questionIndex + 1;
   const extension = blob.type.includes("mp4") ? "mp4" : "webm";
   const answerRef = ref(
@@ -17,12 +27,25 @@ export async function uploadInterviewAnswer(fileName, questionIndex, blob) {
     `interviewAnswers/${fileName}/answer-${answerNumber}.${extension}`,
   );
 
-  await uploadBytes(answerRef, blob, {
+  const task = uploadBytesResumable(answerRef, blob, {
     contentType: blob.type || "video/webm",
     customMetadata: {
       fileName,
       answerNumber: String(answerNumber),
     },
+  });
+
+  await new Promise((resolve, reject) => {
+    task.on(
+      "state_changed",
+      (snapshot) => {
+        options.onProgress?.(
+          Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100),
+        );
+      },
+      reject,
+      resolve,
+    );
   });
 
   return answerRef.fullPath;

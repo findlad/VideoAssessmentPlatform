@@ -1,30 +1,12 @@
 import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminServices } from "@/lib/firebase/admin";
-
-function getBearerToken(request) {
-  const authorization = request.headers.get("authorization") || "";
-  const [scheme, token] = authorization.split(" ");
-
-  return scheme?.toLowerCase() === "bearer" ? token || "" : "";
-}
-
-async function requireAdminUser(request) {
-  const token = getBearerToken(request);
-
-  if (!token) {
-    return null;
-  }
-
-  const { auth } = getAdminServices();
-
-  return auth.verifyIdToken(token);
-}
+import { requireAdminUser } from "@/lib/api/admin-auth";
 
 export async function DELETE(request, { params }) {
-  const decodedToken = await requireAdminUser(request);
+  const adminUser = await requireAdminUser(request);
 
-  if (!decodedToken) {
+  if (!adminUser) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -40,7 +22,7 @@ export async function DELETE(request, { params }) {
   await apiKeyRef.set(
     {
       revokedAt: FieldValue.serverTimestamp(),
-      revokedBy: decodedToken.uid,
+      revokedBy: adminUser.uid,
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true },

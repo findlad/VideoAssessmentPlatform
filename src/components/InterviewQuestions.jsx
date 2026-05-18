@@ -22,6 +22,9 @@ import { uploadInterviewAnswer } from "@/lib/firebase/storage";
 
 const DEFAULT_RECORD_SECONDS = 60;
 const DEFAULT_ATTEMPTS_ALLOWED = 1;
+const UPLOAD_RETRY_DELAYS_MS = [1000, 2500, 5000];
+const DRAFT_DB_NAME = "video-assessment-upload-drafts";
+const DRAFT_STORE_NAME = "answers";
 
 function getQuestionCount(request) {
   return request?.questionCount || request?.questions?.length || 0;
@@ -58,6 +61,81 @@ function getSupportedMimeType() {
   return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
+function canUseIndexedDb() {
+  return typeof window !== "undefined" && "indexedDB" in window;
+}
+
+function openDraftDb() {
+  if (!canUseIndexedDb()) {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DRAFT_DB_NAME, 1);
+
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(DRAFT_STORE_NAME, { keyPath: "id" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function withDraftStore(mode, callback) {
+  const db = await openDraftDb();
+
+  if (!db) {
+    return null;
+  }
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(DRAFT_STORE_NAME, mode);
+      const store = transaction.objectStore(DRAFT_STORE_NAME);
+      const result = callback(store);
+
+      transaction.oncomplete = () => resolve(result);
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function getDraftId(assessmentId, questionIndex) {
+  return `${assessmentId}:${questionIndex}`;
+}
+
+async function saveAnswerDraft(draft) {
+  await withDraftStore("readwrite", (store) => store.put(draft));
+}
+
+async function readAnswerDraft(assessmentId, questionIndex) {
+  return withDraftStore(
+    "readonly",
+    (store) =>
+      new Promise((resolve, reject) => {
+        const request = store.get(getDraftId(assessmentId, questionIndex));
+
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      }),
+  );
+}
+
+async function deleteAnswerDraft(assessmentId, questionIndex) {
+  await withDraftStore("readwrite", (store) =>
+    store.delete(getDraftId(assessmentId, questionIndex)),
+  );
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 export function InterviewQuestions({
   fileName,
   token,
@@ -78,7 +156,10 @@ export function InterviewQuestions({
     useState(DEFAULT_RECORD_SECONDS);
   const [recording, setRecording] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadAttemptMessage, setUploadAttemptMessage] = useState("");
   const [pendingAnswer, setPendingAnswer] = useState(null);
+  const [recoveredDraft, setRecoveredDraft] = useState(false);
   const [attemptsUsedByQuestion, setAttemptsUsedByQuestion] = useState([]);
   const [savedAnswers, setSavedAnswers] = useState([]);
   const [readyForFinalSubmit, setReadyForFinalSubmit] = useState(false);
@@ -145,15 +226,40 @@ export function InterviewQuestions({
           return;
         }
 
-        setCurrentIndex(nextRequest.responseCount || 0);
+        const nextIndex = nextRequest.responseCount || 0;
+        const assessmentId = nextRequest.id || fileName;
+
+        setCurrentIndex(nextIndex);
         setCurrentQuestion(null);
         setPendingAnswer(null);
+        setRecoveredDraft(false);
         setAttemptsUsedByQuestion([]);
         setSavedAnswers([]);
         setReadyForFinalSubmit(false);
         setCompleted(false);
         setExpired(false);
         onCompletedChange?.(false);
+
+        if (assessmentId) {
+          const draft = await readAnswerDraft(assessmentId, nextIndex).catch(
+            () => null,
+          );
+
+          if (!active || !draft?.blob || nextIndex >= getQuestionCount(nextRequest)) {
+            return;
+          }
+
+          setCurrentQuestion(draft.question);
+          setPendingAnswer(draft.blob);
+          setRecoveredDraft(true);
+          setAttemptsUsedByQuestion((current) => {
+            const next = [...current];
+
+            next[nextIndex] = draft.attemptsUsed || 1;
+
+            return next;
+          });
+        }
       } catch (nextError) {
         if (!active) {
           return;
@@ -345,20 +451,39 @@ export function InterviewQuestions({
         }
       };
 
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
         const blob = new Blob(chunksRef.current, {
           type: recorder.mimeType || "video/webm",
         });
+        const assessmentId = request.id || fileName;
+        const nextAttemptsUsed = (attemptsUsedByQuestion[currentIndex] || 0) + 1;
 
         setRecording(false);
         setPendingAnswer(blob);
+        setRecoveredDraft(false);
         setAttemptsUsedByQuestion((current) => {
           const next = [...current];
 
-          next[currentIndex] = (next[currentIndex] || 0) + 1;
+          next[currentIndex] = nextAttemptsUsed;
 
           return next;
         });
+
+        if (assessmentId) {
+          await saveAnswerDraft({
+            attemptsUsed: nextAttemptsUsed,
+            blob,
+            contentType: blob.type || "video/webm",
+            createdAt: new Date().toISOString(),
+            id: getDraftId(assessmentId, currentIndex),
+            question: settings,
+            questionIndex: currentIndex,
+          }).catch(() => {
+            setError(
+              "Your answer was recorded, but this browser could not store a recovery copy. Please submit it before closing this page.",
+            );
+          });
+        }
       };
 
       recorder.start();
@@ -389,39 +514,66 @@ export function InterviewQuestions({
     }
 
     setUploading(true);
+    setUploadProgress(0);
+    setUploadAttemptMessage("Preparing upload...");
     setError("");
 
     try {
       const assessmentId = request.id || fileName;
       const questionCount = getQuestionCount(request);
-      const path = await uploadInterviewAnswer(
-        assessmentId,
-        currentIndex,
-        pendingAnswer,
-      );
       const nextResponseCount = currentIndex + 1;
+      let path = "";
 
-      await writeDocument(
-        `questions/${assessmentId}/answers`,
-        `answer-${nextResponseCount}`,
-        {
-          attemptsAllowed: currentQuestion.attemptsAllowed,
-          attemptsUsed: attemptsUsedByQuestion[currentIndex] || 1,
-          maxDurationSeconds: currentQuestion.maxDurationSeconds,
-          question: currentQuestion.question,
-          questionIndex: currentIndex,
-          storagePath: path,
-          contentType: pendingAnswer.type || "video/webm",
-        },
-      );
-      await updateDocument("questions", assessmentId, {
-        responseCount: nextResponseCount,
-        status: "in-progress",
-      });
+      for (let attempt = 0; attempt <= UPLOAD_RETRY_DELAYS_MS.length; attempt += 1) {
+        try {
+          setUploadAttemptMessage(
+            attempt === 0
+              ? "Uploading answer..."
+              : `Retrying upload, attempt ${attempt + 1}...`,
+          );
+          path = await uploadInterviewAnswer(
+            assessmentId,
+            currentIndex,
+            pendingAnswer,
+            {
+              onProgress: setUploadProgress,
+            },
+          );
+
+          setUploadAttemptMessage("Saving answer metadata...");
+          await writeDocument(
+            `questions/${assessmentId}/answers`,
+            `answer-${nextResponseCount}`,
+            {
+              attemptsAllowed: currentQuestion.attemptsAllowed,
+              attemptsUsed: attemptsUsedByQuestion[currentIndex] || 1,
+              maxDurationSeconds: currentQuestion.maxDurationSeconds,
+              question: currentQuestion.question,
+              questionIndex: currentIndex,
+              storagePath: path,
+              contentType: pendingAnswer.type || "video/webm",
+            },
+          );
+          await updateDocument("questions", assessmentId, {
+            responseCount: nextResponseCount,
+            status: "in-progress",
+          });
+          break;
+        } catch (uploadError) {
+          if (attempt >= UPLOAD_RETRY_DELAYS_MS.length) {
+            throw uploadError;
+          }
+
+          setUploadAttemptMessage("Upload failed. Retrying automatically...");
+          await wait(UPLOAD_RETRY_DELAYS_MS[attempt]);
+        }
+      }
 
       setSavedAnswers((current) => [...current, path]);
+      await deleteAnswerDraft(assessmentId, currentIndex).catch(() => {});
       setPendingAnswer(null);
       setCurrentQuestion(null);
+      setRecoveredDraft(false);
 
       if (nextResponseCount >= questionCount) {
         setReadyForFinalSubmit(true);
@@ -429,13 +581,17 @@ export function InterviewQuestions({
         setCurrentIndex(nextResponseCount);
       }
     } catch (nextError) {
-      setError(
+      const message =
         nextError instanceof Error
           ? nextError.message
-          : "Unable to upload this answer.",
+          : "Unable to upload this answer.";
+
+      setError(
+        `${message} The recording is still saved on this device; keep this tab open or retry from this browser.`,
       );
     } finally {
       setUploading(false);
+      setUploadAttemptMessage("");
     }
   }
 
@@ -507,7 +663,7 @@ export function InterviewQuestions({
     );
   }
 
-  if (error) {
+  if (error && !pendingAnswer) {
     return <Alert severity="error">{error}</Alert>;
   }
 
@@ -664,6 +820,13 @@ export function InterviewQuestions({
 
   return (
     <Stack spacing={3}>
+      {error ? <Alert severity="error">{error}</Alert> : null}
+      {recoveredDraft ? (
+        <Alert severity="info">
+          We recovered a recorded answer from this browser. Submit it to
+          continue.
+        </Alert>
+      ) : null}
       <Box>
         <Typography component="p" sx={{ color: "#657085", mb: 1 }}>
           Question {currentIndex + 1} of {questionCount}
@@ -725,11 +888,24 @@ export function InterviewQuestions({
             {uploading ? <CircularProgress color="inherit" /> : null}
             <Typography>
               {uploading
-                ? "Uploading answer..."
+                ? uploadAttemptMessage || "Uploading answer..."
                 : pendingAnswer
                   ? "Answer recorded. Submit it or retry if you have attempts remaining."
                   : "Ready when you are. Starting will reveal the question and begin recording."}
             </Typography>
+            {uploading ? (
+              <Box sx={{ maxWidth: 420, width: "100%" }}>
+                <LinearProgress
+                  variant={uploadProgress ? "determinate" : "indeterminate"}
+                  value={uploadProgress}
+                />
+                {uploadProgress ? (
+                  <Typography sx={{ mt: 1 }}>
+                    {uploadProgress}% uploaded
+                  </Typography>
+                ) : null}
+              </Box>
+            ) : null}
           </Stack>
         ) : null}
       </Box>

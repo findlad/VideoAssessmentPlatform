@@ -70,6 +70,32 @@ service cloud.firestore {
         && isServerTimestamp('updatedAt');
     }
 
+    function isValidQuestionReviewUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isSignedIn()
+        && resource.data.createdBy == request.auth.uid
+        && changed.hasOnly([
+          'status',
+          'reviewedAt',
+          'overallScore',
+          'reviewSummary',
+          'updatedAt'
+        ])
+        && (!changed.hasAny(['status'])
+          || request.resource.data.status == 'reviewed')
+        && (!changed.hasAny(['reviewedAt'])
+          || request.resource.data.reviewedAt is timestamp)
+        && (!changed.hasAny(['overallScore'])
+          || request.resource.data.overallScore == null
+          || (request.resource.data.overallScore is number
+            && request.resource.data.overallScore >= 1
+            && request.resource.data.overallScore <= 10))
+        && (!changed.hasAny(['reviewSummary'])
+          || (request.resource.data.reviewSummary is string
+            && request.resource.data.reviewSummary.size() <= 5000))
+        && isServerTimestamp('updatedAt');
+    }
+
     function isQuestionOwner(questionId) {
       return isSignedIn()
         && get(/databases/$(database)/documents/questions/$(questionId)).data.createdBy == request.auth.uid;
@@ -106,7 +132,12 @@ service cloud.firestore {
     function isValidAnswerReviewUpdate(questionId) {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return isQuestionOwner(questionId)
-        && changed.hasOnly(['reviewRating', 'reviewNotes', 'updatedAt'])
+        && changed.hasOnly([
+          'reviewRating',
+          'reviewNotes',
+          'responseReviewed',
+          'updatedAt'
+        ])
         && (!changed.hasAny(['reviewRating'])
           || (request.resource.data.reviewRating is int
             && request.resource.data.reviewRating >= 1
@@ -114,6 +145,8 @@ service cloud.firestore {
         && (!changed.hasAny(['reviewNotes'])
           || (request.resource.data.reviewNotes is string
             && request.resource.data.reviewNotes.size() <= 5000))
+        && (!changed.hasAny(['responseReviewed'])
+          || request.resource.data.responseReviewed == true)
         && isServerTimestamp('updatedAt');
     }
 
@@ -179,8 +212,8 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read, update, delete: if isSignedIn() && request.auth.uid == userId;
-      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create, update, delete: if false;
     }
 
     match /assessments/{assessmentId} {
@@ -191,7 +224,8 @@ service cloud.firestore {
       allow create: if isValidQuestionRequest();
       allow get: if true;
       allow list: if isSignedIn() && resource.data.createdBy == request.auth.uid;
-      allow update: if isValidQuestionResponseUpdate();
+      allow update: if isValidQuestionResponseUpdate()
+        || isValidQuestionReviewUpdate();
       allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
 
       match /answers/{answerId} {

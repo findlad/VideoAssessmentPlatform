@@ -35,12 +35,49 @@ npm run dev
 npm run firebase:emulators
 ```
 
+6. Build check:
+
+```bash
+npm run build
+```
+
 ## Firebase Layout
 
 - `src/lib/firebase/client.js`: browser Firebase app, Auth, Firestore, Storage, Functions, emulator wiring.
 - `src/lib/firebase/admin.js`: server-side Firebase Admin singleton.
+- `src/lib/api/admin-auth.js`: Firebase ID token verification, admin role check, and first-admin bootstrap.
 - `src/context/FirebaseContext.jsx`: React provider and `useFirebase()` hook.
 - `functions/src/index.ts`: Cloud Functions entry points.
+
+## Admin Authentication
+
+Admins sign in with Google through Firebase Authentication. Enable the Google sign-in provider in Firebase Console before using the dashboard.
+
+Set `INITIAL_ADMIN_EMAIL` to bootstrap the first admin. When that Google account signs in for the first time, the server creates `users/{uid}` with `role: "admin"`. After that, admin-only API routes check the signed Firebase ID token against the `users` document.
+
+```bash
+INITIAL_ADMIN_EMAIL=admin@example.com
+```
+
+The `users` collection is not writable from the browser; admin role changes should be made server-side or directly in Firebase Console while this project has no admin-user-management screen.
+
+## Demo Data
+
+Seed 12 sample assessments in mixed states with:
+
+```bash
+npm run seed:demo -- --ownerUid=<firebase-auth-admin-uid> --ownerEmail=admin@example.com
+```
+
+For completed and reviewed assessments with playable videos, first record or provide a small local `.webm` or `.mp4` file, then run:
+
+```bash
+npm run seed:demo -- --ownerUid=<firebase-auth-admin-uid> --ownerEmail=admin@example.com --sampleVideo=./sample-answer.webm
+```
+
+The script writes Firestore `questions` documents, answer subcollection documents, and uploads the sample video to Firebase Storage for each completed/reviewed answer. Without `--sampleVideo`, it still creates the assessments and answer metadata, but video playback/downloads for those seeded completed rows will point at placeholder paths.
+
+The owner UID must match the admin Firebase Auth UID that signs into the dashboard, because the current dashboard lists assessments by `createdBy`.
 
 ## Interview Request API
 
@@ -144,6 +181,8 @@ curl -X POST http://localhost:3000/api/v1/assessments/trigger \
 The endpoint validates required fields, creates an assessment, queues the invitation email, logs success/failure to `apiRequestLogs`, and prevents duplicate assessment creation for the same candidate/title within `INTAKE_DUPLICATE_WINDOW_SECONDS`.
 
 `INTAKE_ASSESSMENT_OWNER_UID` can be set to associate API-created assessments with a specific admin user until full admin role management is implemented. Candidate assessment links use unguessable access tokens in the `token` query parameter and expire after `ASSESSMENT_LINK_EXPIRY_DAYS` days. Legacy `fileName` links are still accepted for older local test data.
+
+Current reliability notes: the endpoint logs requests and prevents obvious duplicates, but full per-key rate limiting is still a production hardening item.
 
 ### Video Retrieval API
 
@@ -269,8 +308,65 @@ Server-side Firebase Admin requires these env vars:
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY=
+INITIAL_ADMIN_EMAIL=
 ```
 
 `NEXT_PUBLIC_DEPLOYMENT_URL` should be set in deployed environments so email links use an absolute URL.
 
-# VideoAssessmentPlatform
+## Deployment
+
+This app is configured for Firebase App Hosting with [apphosting.yaml](./apphosting.yaml). Set production values before deploying:
+
+```bash
+NEXT_PUBLIC_DEPLOYMENT_URL=
+NEXT_PUBLIC_EMAIL_FROM_ADDRESS=
+INITIAL_ADMIN_EMAIL=
+INTAKE_ASSESSMENT_OWNER_UID=
+```
+
+Deploy security rules after changing Firestore or Storage rules:
+
+```bash
+firebase deploy --only firestore:rules,storage
+```
+
+Deploy the app through App Hosting after the backend is configured:
+
+```bash
+firebase deploy
+```
+
+## QA Checklist
+
+- Sign in with the `INITIAL_ADMIN_EMAIL` Google account and verify the admin user document is bootstrapped.
+- Manually create an assessment with 4 default questions, change attempts/duration, and confirm the invitation email arrives.
+- Trigger `/api/v1/assessments/trigger` with a valid API key and with invalid payloads.
+- Open the candidate link on desktop and verify questions are hidden until recording starts.
+- Confirm camera/microphone setup blocks progress until confirmed.
+- Record answers, test retry limits, and submit the assessment.
+- Temporarily disconnect the network after recording and confirm upload retry/recovery behavior.
+- Open the candidate link on a phone/tablet and confirm the unsupported-device block appears before questions load.
+- Review a completed assessment: play videos, change playback speed, score, add notes, mark responses reviewed, and mark the whole assessment reviewed.
+- Download one video and bulk download all videos.
+- Call `/api/v1/assessments/{assessment_id}/videos` for a completed assessment and confirm signed URLs are returned.
+- Check invited, in-progress, completed, reviewed, and expired states in the dashboard filters.
+
+## Demo Outline
+
+For the recorded demo, show:
+
+- Admin Google sign-in and API key generation.
+- API-triggered assessment using `curl` or Postman.
+- Manual assessment creation from the dashboard.
+- Candidate landing page, device check, no-preparation question reveal, recording, upload, and final submission.
+- Unsupported mobile/tablet blocking.
+- Review workflow with scoring, notes, playback speed, individual download, bulk download, and mark reviewed.
+- Video retrieval API response for a completed assessment.
+
+## Known Gaps
+
+- Admin user management is bootstrapped but there is no UI yet to invite/revoke admins.
+- API request logging and duplicate prevention exist, but dedicated rate limiting is still a production hardening item.
+- Email provider acceptance is handled by the Firebase mail extension flow, but failed-email retry UI is not built yet.
+- Link expiry is configured by environment variable rather than an admin settings screen.
+- API-created assessments appear in the current dashboard when `INTAKE_ASSESSMENT_OWNER_UID` is set to the reviewing admin UID.
