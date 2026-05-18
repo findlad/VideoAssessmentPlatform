@@ -17,7 +17,7 @@ npm --prefix functions install
 2. Copy env templates:
 
 ```bash
-cp .env.local.example .env.local
+cp .env.example .env
 cp functions/.env.example functions/.env
 ```
 
@@ -45,21 +45,21 @@ npm run build
 
 - `src/lib/firebase/client.js`: browser Firebase app, Auth, Firestore, Storage, Functions, emulator wiring.
 - `src/lib/firebase/admin.js`: server-side Firebase Admin singleton.
-- `src/lib/api/admin-auth.js`: Firebase ID token verification, admin role check, and first-admin bootstrap.
+- `src/lib/api/admin-auth.js`: Firebase ID token verification and admin access checks.
 - `src/context/FirebaseContext.jsx`: React provider and `useFirebase()` hook.
 - `functions/src/index.ts`: Cloud Functions entry points.
 
 ## Admin Authentication
 
-Admins sign in with Google through Firebase Authentication. Enable the Google sign-in provider in Firebase Console before using the dashboard.
+Admins sign in through Firebase Authentication using Google or email/password. Enable the Google and Email/Password sign-in providers in Firebase Console before using both options.
 
-Set `INITIAL_ADMIN_EMAIL` to bootstrap the first admin. When that Google account signs in for the first time, the server creates `users/{uid}` with `role: "admin"`. After that, admin-only API routes check the signed Firebase ID token against the `users` document.
+For demo/self-service access, set:
 
 ```bash
-INITIAL_ADMIN_EMAIL=admin@example.com
+ALLOW_ADMIN_SELF_SIGNUP=true
 ```
 
-The `users` collection is not writable from the browser; admin role changes should be made server-side or directly in Firebase Console while this project has no admin-user-management screen.
+When enabled, any signed-in Firebase user is automatically created as an admin. This keeps the demo simple: reviewers can create an account with Google or email/password and use the dashboard immediately.
 
 ## Demo Data
 
@@ -154,7 +154,7 @@ Error response:
 Example:
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/assessments/trigger \
+curl -X POST http://videoassessmentplatform--videoassessmentplatform.us-central1.hosted.app/api/v1/assessments/trigger \
   -H "Authorization: Bearer $INTAKE_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -191,6 +191,13 @@ External systems can retrieve completed assessment videos with:
 ```http
 GET /api/v1/assessments/{assessment_id}/videos
 Authorization: Bearer <api-key>
+```
+
+Example:
+
+```bash
+curl -i -X GET "https://videoassessmentplatform--videoassessmentplatform.us-central1.hosted.app/api/v1/assessments/{assessment_id}/videos" \
+  -H "Authorization: Bearer <api-key>"
 ```
 
 The endpoint uses the same API keys as the intake API. It returns signed Firebase Storage URLs that expire after `VIDEO_SIGNED_URL_TTL_SECONDS` seconds, defaulting to one hour.
@@ -308,7 +315,7 @@ Server-side Firebase Admin requires these env vars:
 FIREBASE_PROJECT_ID=
 FIREBASE_CLIENT_EMAIL=
 FIREBASE_PRIVATE_KEY=
-INITIAL_ADMIN_EMAIL=
+ALLOW_ADMIN_SELF_SIGNUP=true
 ```
 
 `NEXT_PUBLIC_DEPLOYMENT_URL` should be set in deployed environments so email links use an absolute URL.
@@ -320,7 +327,7 @@ This app is configured for Firebase App Hosting with [apphosting.yaml](./apphost
 ```bash
 NEXT_PUBLIC_DEPLOYMENT_URL=
 NEXT_PUBLIC_EMAIL_FROM_ADDRESS=
-INITIAL_ADMIN_EMAIL=
+ALLOW_ADMIN_SELF_SIGNUP=true
 INTAKE_ASSESSMENT_OWNER_UID=
 ```
 
@@ -338,7 +345,7 @@ firebase deploy
 
 ## QA Checklist
 
-- Sign in with the `INITIAL_ADMIN_EMAIL` Google account and verify the admin user document is bootstrapped.
+- Create an account with Google or email/password and verify the dashboard loads.
 - Manually create an assessment with 4 default questions, change attempts/duration, and confirm the invitation email arrives.
 - Trigger `/api/v1/assessments/trigger` with a valid API key and with invalid payloads.
 - Open the candidate link on desktop and verify questions are hidden until recording starts.
@@ -365,7 +372,7 @@ For the recorded demo, show:
 
 ## Known Gaps
 
-- Admin user management is bootstrapped but there is no UI yet to invite/revoke admins.
+- `ALLOW_ADMIN_SELF_SIGNUP=true` is convenient for demos, but a production deployment should add explicit admin invitation/revocation.
 - API request logging and duplicate prevention exist, but dedicated rate limiting is still a production hardening item.
 - Email provider acceptance is handled by the Firebase mail extension flow, but failed-email retry UI is not built yet.
 - Link expiry is configured by environment variable rather than an admin settings screen.

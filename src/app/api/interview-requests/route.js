@@ -42,6 +42,10 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function paragraphToHtml(value) {
+  return `<p>${escapeHtml(value)}</p>`;
+}
+
 function normalizeQuestions(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -157,10 +161,12 @@ export async function POST(request) {
       updatedAt: timestamp,
     });
     const interviewLink = getInterviewLink(request, accessToken);
-    const safeInterviewTitle = escapeHtml(interviewTitle);
-    const safeIntervieweeName = escapeHtml(intervieweeName);
-    const safeRequesterName = escapeHtml(requesterName);
     const safeInterviewLink = escapeHtml(interviewLink);
+    const emailLines = [
+      `Hello ${intervieweeName},`,
+      `You have received an interview request for ${interviewTitle} from ${requesterName}. ${requesterName} has posed a series of questions. Once you have tested and granted permission to use your camera and microphone, you will see the first question and we will record your answer. The interviewer may allow multiple attempts, but the default is one. This link expires on ${expiresAt.toLocaleDateString()}. When you are ready to start your video interview, please click the link:`,
+      interviewLink,
+    ];
     const mailRequest = {
       to: [targetEmail],
       metadata: {
@@ -177,12 +183,13 @@ export async function POST(request) {
       },
       message: {
         subject: `${interviewTitle} interview request from ${requesterName}`,
-        text: `Hello ${intervieweeName},\n\nYou have received an interview request for ${interviewTitle} from ${requesterName}. ${requesterName} has posed a series of questions, you will be able to read the questions one at a time, and when ready to answer, you can click the record button. Once you have granted permission to use your camera and microphone, we will record your answer. The interviewer may allow multiple attempts, but the default is one. This link expires on ${expiresAt.toLocaleDateString()}. When you are ready to start your video interview, please click the link:\n\n${interviewLink}`,
-        html: `<p>Hello ${safeIntervieweeName},</p><p>You have received an interview request for <strong>${safeInterviewTitle}</strong> from ${safeRequesterName}.</p>
-        <p>${safeRequesterName} has posed a series of questions, you will be able to read the questions one at a time, and when ready to answer, you can click the record button. Once you have granted permission to use your camera and microphone, we will record your answer. The interviewer may allow multiple attempts, but the default is one.</p>
-        <p>This link expires on ${escapeHtml(expiresAt.toLocaleDateString())}.</p>
-        <p>When you are ready to start your video interview, please click the link:</p>
-        <p><a href="${safeInterviewLink}">Conduct Video Interview</a></p>`,
+        text: emailLines.join("\n\n"),
+        html: `${emailLines
+          .slice(0, 2)
+          .map((line) => paragraphToHtml(line))
+          .join(
+            "",
+          )}<p><a href="${safeInterviewLink}">${safeInterviewLink}</a></p>`,
       },
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

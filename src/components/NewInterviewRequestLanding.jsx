@@ -41,7 +41,9 @@ import {
   whereEquals,
 } from "@/lib/firebase/firestore";
 import {
+  createUserWithEmailAndPassword,
   GoogleAuthProvider,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
 } from "firebase/auth";
@@ -223,6 +225,9 @@ export function NewInterviewRequestLanding() {
   const [interviews, setInterviews] = useState([]);
   const [adminStatus, setAdminStatus] = useState("signed-out");
   const [adminUser, setAdminUser] = useState(null);
+  const [authMode, setAuthMode] = useState("sign-in");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [interviewTitle, setInterviewTitle] = useState("");
   const [requesterName, setRequesterName] = useState("");
@@ -338,6 +343,39 @@ export function NewInterviewRequestLanding() {
         nextError instanceof Error
           ? nextError.message
           : "Unable to sign in with Google.",
+      );
+    }
+  }
+
+  async function handleEmailPasswordAuth(event) {
+    event.preventDefault();
+    setAuthError("");
+
+    try {
+      if (!auth) {
+        throw new Error("Firebase Auth is not initialized.");
+      }
+
+      if (authMode === "create") {
+        await createUserWithEmailAndPassword(
+          auth,
+          authEmail.trim(),
+          authPassword,
+        );
+      } else {
+        await signInWithEmailAndPassword(
+          auth,
+          authEmail.trim(),
+          authPassword,
+        );
+      }
+
+      setAuthPassword("");
+    } catch (nextError) {
+      setAuthError(
+        nextError instanceof Error
+          ? nextError.message
+          : "Unable to authenticate with email and password.",
       );
     }
   }
@@ -1004,7 +1042,7 @@ export function NewInterviewRequestLanding() {
         py: { xs: 6, md: 10 },
       }}
     >
-      <Container maxWidth="lg">
+      <Container maxWidth="xl">
         <Stack spacing={4}>
           <Stack spacing={2}>
             <Box>
@@ -1049,8 +1087,7 @@ export function NewInterviewRequestLanding() {
                 </Typography>
                 {authError ? <Alert severity="error">{authError}</Alert> : null}
                 <Typography sx={{ color: "#657085" }}>
-                  Sign in with the Google account that has been granted admin
-                  access.
+                  Sign in with Google, or use email and password if you prefer.
                 </Typography>
                 <Button
                   type="button"
@@ -1061,6 +1098,72 @@ export function NewInterviewRequestLanding() {
                 >
                   Sign in with Google
                 </Button>
+                <Box
+                  component="form"
+                  onSubmit={handleEmailPasswordAuth}
+                  sx={{
+                    borderTop: "1px solid #d9dee8",
+                    mt: 1,
+                    pt: 2,
+                  }}
+                >
+                  <Stack spacing={1.5}>
+                    <Typography component="h3" sx={{ fontSize: "1rem" }}>
+                      {authMode === "create"
+                        ? "Create account with email"
+                        : "Sign in with email"}
+                    </Typography>
+                    <TextField
+                      label="Email"
+                      type="email"
+                      value={authEmail}
+                      onChange={(event) => setAuthEmail(event.target.value)}
+                      required
+                      fullWidth
+                      slotProps={{
+                        htmlInput: {
+                          suppressHydrationWarning: true,
+                        },
+                      }}
+                    />
+                    <TextField
+                      label="Password"
+                      type="password"
+                      value={authPassword}
+                      onChange={(event) => setAuthPassword(event.target.value)}
+                      required
+                      fullWidth
+                    />
+                    <Stack
+                      direction={{ xs: "column", sm: "row" }}
+                      spacing={1}
+                      sx={{ alignItems: { xs: "stretch", sm: "center" } }}
+                    >
+                      <Button
+                        type="submit"
+                        variant="outlined"
+                        disabled={authLoading}
+                      >
+                        {authMode === "create"
+                          ? "Create account"
+                          : "Sign in"}
+                      </Button>
+                      <Button
+                        type="button"
+                        color="inherit"
+                        onClick={() =>
+                          setAuthMode((current) =>
+                            current === "create" ? "sign-in" : "create",
+                          )
+                        }
+                      >
+                        {authMode === "create"
+                          ? "Use existing account"
+                          : "Create an account"}
+                      </Button>
+                    </Stack>
+                  </Stack>
+                </Box>
               </Stack>
             </Box>
           ) : adminStatus !== "authorized" ? (
@@ -1336,7 +1439,7 @@ export function NewInterviewRequestLanding() {
                     <MenuItem value="score-asc">Score, low to high</MenuItem>
                   </TextField>
                 </Stack>
-                <TableContainer>
+                <TableContainer sx={{ width: "100%" }}>
                   <Table>
                     <TableHead>
                       <TableRow>
@@ -1348,7 +1451,9 @@ export function NewInterviewRequestLanding() {
                         <TableCell>Responses</TableCell>
                         <TableCell>Submitted</TableCell>
                         <TableCell>Score</TableCell>
-                        <TableCell align="right">Actions</TableCell>
+                        <TableCell align="right" sx={{ minWidth: 260 }}>
+                          Actions
+                        </TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1399,7 +1504,9 @@ export function NewInterviewRequestLanding() {
                             <TableCell>
                               {interview.intervieweeName || "Unknown"}
                             </TableCell>
-                            <TableCell>{interview.targetEmail}</TableCell>
+                            <TableCell sx={{ overflowWrap: "anywhere" }}>
+                              {interview.targetEmail}
+                            </TableCell>
                             <TableCell>
                               <Chip
                                 label={interview.source === "api" ? "API" : "Manual"}
@@ -1424,11 +1531,14 @@ export function NewInterviewRequestLanding() {
                                 ? `${interview.overallScore}/10`
                                 : "Unscored"}
                             </TableCell>
-                            <TableCell align="right">
+                            <TableCell align="right" sx={{ minWidth: 260 }}>
                               <Stack
                                 direction="row"
                                 spacing={1}
-                                sx={{ justifyContent: "flex-end" }}
+                                sx={{
+                                  justifyContent: "flex-end",
+                                  minWidth: 240,
+                                }}
                               >
                                 <Button
                                   size="small"
@@ -1666,7 +1776,7 @@ export function NewInterviewRequestLanding() {
           setSelectedReviewInterview(null);
         }}
         fullWidth
-        maxWidth="md"
+        maxWidth="xl"
       >
         <DialogTitle>
           {selectedReviewInterview?.intervieweeName || "Interview response"}
@@ -1734,138 +1844,161 @@ export function NewInterviewRequestLanding() {
                 <Alert severity="info">No uploaded answers were found.</Alert>
               ) : null}
               {selectedAnswers.map((answer) => (
-                <Box key={answer.id}>
+                <Box
+                  key={answer.id}
+                  sx={{
+                    borderTop: "1px solid #d9dee8",
+                    pt: 3,
+                  }}
+                >
                   <Typography
                     component="h3"
-                    sx={{ fontSize: "1.05rem", mb: 1 }}
+                    sx={{ fontSize: "1.05rem", mb: 1.5 }}
                   >
                     Question {answer.questionIndex + 1}: {answer.question}
                   </Typography>
                   <Box
-                    component="video"
-                    controls
-                    data-review-video
-                    onLoadedMetadata={(event) => {
-                      event.currentTarget.playbackRate = playbackSpeed;
-                    }}
-                    onRateChange={(event) => {
-                      if (event.currentTarget.playbackRate !== playbackSpeed) {
-                        event.currentTarget.playbackRate = playbackSpeed;
-                      }
-                    }}
-                    src={answer.url}
                     sx={{
-                      bgcolor: "#0f172a",
-                      borderRadius: 1,
-                      width: "100%",
+                      display: "grid",
+                      gap: 2.5,
+                      gridTemplateColumns: {
+                        xs: "1fr",
+                        lg: "minmax(520px, 1.6fr) minmax(360px, 0.9fr)",
+                      },
                     }}
-                  />
-                  <Stack spacing={1.5} sx={{ mt: 2 }}>
-                    <Box>
-                      <Typography sx={{ color: "#657085", mb: 1 }}>
-                        Rating
-                      </Typography>
-                      <Stack
-                        direction="row"
-                        spacing={0.75}
-                        sx={{ flexWrap: "wrap", rowGap: 1 }}
-                      >
-                        {Array.from({ length: 10 }, (_, ratingIndex) => {
-                          const rating = ratingIndex + 1;
-                          const selected = Number(answer.reviewRating) === rating;
-                          const saving = savingReviewId === answer.id;
-
-                          return (
-                            <Button
-                              key={rating}
-                              aria-pressed={selected}
-                              size="small"
-                              variant={selected ? "contained" : "outlined"}
-                              disabled={saving}
-                              onClick={() => handleReviewRating(answer, rating)}
-                              sx={{
-                                borderWidth: selected ? 2 : 1,
-                                fontWeight: selected ? 800 : 500,
-                                minWidth: 38,
-                                ...(selected && {
-                                  bgcolor: "#1665d8",
-                                  boxShadow: "0 0 0 2px rgba(22, 101, 216, 0.2)",
-                                  color: "#fff",
-                                  "&.Mui-disabled": {
-                                    bgcolor: "#1665d8",
-                                    color: "#fff",
-                                    opacity: 0.72,
-                                  },
-                                  "&:hover": {
-                                    bgcolor: "#0f56bd",
-                                  },
-                                }),
-                              }}
-                            >
-                              {rating}
-                            </Button>
-                          );
-                        })}
-                      </Stack>
-                      <Typography sx={{ color: "#657085", mt: 1 }}>
-                        {answer.reviewRating
-                          ? `${savingReviewId === answer.id ? "Saving" : "Saved"} rating: ${answer.reviewRating}/10`
-                          : "No rating selected."}
-                      </Typography>
-                    </Box>
-                    <Button
-                      variant="outlined"
-                      startIcon={
-                        downloadingAnswerId === answer.id ? (
-                          <CircularProgress color="inherit" size={16} />
-                        ) : (
-                          <FileDownloadOutlinedIcon />
-                        )
-                      }
-                      onClick={() => handleDownloadAnswer(answer)}
-                      disabled={downloadingAnswerId === answer.id}
-                      sx={{ alignSelf: "flex-start" }}
-                    >
-                      Download video
-                    </Button>
-                    <TextField
-                      label="Notes"
-                      value={answer.reviewNotes || ""}
-                      onChange={(event) =>
-                        handleReviewNotesChange(answer.id, event.target.value)
-                      }
-                      multiline
-                      minRows={3}
-                      fullWidth
+                  >
+                    <Box
+                      component="video"
+                      controls
+                      data-review-video
+                      onLoadedMetadata={(event) => {
+                        event.currentTarget.playbackRate = playbackSpeed;
+                      }}
+                      onRateChange={(event) => {
+                        if (event.currentTarget.playbackRate !== playbackSpeed) {
+                          event.currentTarget.playbackRate = playbackSpeed;
+                        }
+                      }}
+                      src={answer.url}
+                      sx={{
+                        bgcolor: "#0f172a",
+                        borderRadius: 1,
+                        maxHeight: "70vh",
+                        width: "100%",
+                      }}
                     />
-                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                    <Stack spacing={1.5}>
+                      <Box>
+                        <Typography sx={{ color: "#657085", mb: 1 }}>
+                          Rating
+                        </Typography>
+                        <Stack
+                          direction="row"
+                          spacing={0.75}
+                          sx={{ flexWrap: "wrap", rowGap: 1 }}
+                        >
+                          {Array.from({ length: 10 }, (_, ratingIndex) => {
+                            const rating = ratingIndex + 1;
+                            const selected =
+                              Number(answer.reviewRating) === rating;
+                            const saving = savingReviewId === answer.id;
+
+                            return (
+                              <Button
+                                key={rating}
+                                aria-pressed={selected}
+                                size="small"
+                                variant={selected ? "contained" : "outlined"}
+                                disabled={saving}
+                                onClick={() => handleReviewRating(answer, rating)}
+                                sx={{
+                                  borderWidth: selected ? 2 : 1,
+                                  fontWeight: selected ? 800 : 500,
+                                  minWidth: 38,
+                                  ...(selected && {
+                                    bgcolor: "#1665d8",
+                                    boxShadow:
+                                      "0 0 0 2px rgba(22, 101, 216, 0.2)",
+                                    color: "#fff",
+                                    "&.Mui-disabled": {
+                                      bgcolor: "#1665d8",
+                                      color: "#fff",
+                                      opacity: 0.72,
+                                    },
+                                    "&:hover": {
+                                      bgcolor: "#0f56bd",
+                                    },
+                                  }),
+                                }}
+                              >
+                                {rating}
+                              </Button>
+                            );
+                          })}
+                        </Stack>
+                        <Typography sx={{ color: "#657085", mt: 1 }}>
+                          {answer.reviewRating
+                            ? `${savingReviewId === answer.id ? "Saving" : "Saved"} rating: ${answer.reviewRating}/10`
+                            : "No rating selected."}
+                        </Typography>
+                      </Box>
                       <Button
                         variant="outlined"
-                        onClick={() => handleSaveReviewNotes(answer)}
-                        disabled={savingNotesId === answer.id}
-                        sx={{ alignSelf: "flex-start" }}
-                      >
-                        {savingNotesId === answer.id ? (
-                          <CircularProgress color="inherit" size={18} />
-                        ) : (
-                          "Save notes"
-                        )}
-                      </Button>
-                      <Button
-                        color={answer.responseReviewed ? "success" : "primary"}
-                        variant={answer.responseReviewed ? "contained" : "outlined"}
-                        onClick={() => handleMarkAnswerReviewed(answer)}
-                        disabled={
-                          answer.responseReviewed || savingReviewId === answer.id
+                        startIcon={
+                          downloadingAnswerId === answer.id ? (
+                            <CircularProgress color="inherit" size={16} />
+                          ) : (
+                            <FileDownloadOutlinedIcon />
+                          )
                         }
+                        onClick={() => handleDownloadAnswer(answer)}
+                        disabled={downloadingAnswerId === answer.id}
                         sx={{ alignSelf: "flex-start" }}
                       >
-                        {answer.responseReviewed
-                          ? "Response reviewed"
-                          : "Mark response reviewed"}
+                        Download video
                       </Button>
+                      <TextField
+                        label="Notes"
+                        value={answer.reviewNotes || ""}
+                        onChange={(event) =>
+                          handleReviewNotesChange(answer.id, event.target.value)
+                        }
+                        multiline
+                        minRows={6}
+                        fullWidth
+                      />
+                      <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                        <Button
+                          variant="outlined"
+                          onClick={() => handleSaveReviewNotes(answer)}
+                          disabled={savingNotesId === answer.id}
+                          sx={{ alignSelf: "flex-start" }}
+                        >
+                          {savingNotesId === answer.id ? (
+                            <CircularProgress color="inherit" size={18} />
+                          ) : (
+                            "Save notes"
+                          )}
+                        </Button>
+                        <Button
+                          color={answer.responseReviewed ? "success" : "primary"}
+                          variant={
+                            answer.responseReviewed ? "contained" : "outlined"
+                          }
+                          onClick={() => handleMarkAnswerReviewed(answer)}
+                          disabled={
+                            answer.responseReviewed ||
+                            savingReviewId === answer.id
+                          }
+                          sx={{ alignSelf: "flex-start" }}
+                        >
+                          {answer.responseReviewed
+                            ? "Response reviewed"
+                            : "Mark response reviewed"}
+                        </Button>
+                      </Stack>
                     </Stack>
-                  </Stack>
+                  </Box>
                 </Box>
               ))}
             </Stack>

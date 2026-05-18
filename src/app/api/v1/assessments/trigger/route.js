@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import crypto from "node:crypto";
 import {
   authenticateApiKey,
   sha256,

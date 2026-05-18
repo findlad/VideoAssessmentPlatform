@@ -46,8 +46,13 @@ env:
 
   # First admin bootstrap. Uncomment and set this before first production admin
   # sign-in if you want automatic admin role creation.
-  # - variable: INITIAL_ADMIN_EMAIL
-  #   value: "admin@example.com"
+  - variable: INITIAL_ADMIN_EMAIL
+    value: "findlad@gmail.com"
+
+  # Demo-friendly mode: any Google user who signs in is created as an admin.
+  # For a real production deployment, set this to "false" and manage admins.
+  - variable: ALLOW_ADMIN_SELF_SIGNUP
+    value: "true"
 
   # Set this to your admin user's Firebase Auth UID if you want API-created
   # assessments to appear in that admin dashboard with the current data model.

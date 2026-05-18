@@ -59,10 +59,10 @@ export function InterviewPageContent({ fileName, token }) {
         color: "#172033",
         display: "flex",
         alignItems: "center",
-        py: 8,
+        py: { xs: 4, md: 5 },
       }}
     >
-      <Container maxWidth="sm">
+      <Container maxWidth="md">
         <Typography component="p" sx={{ color: "#1665d8", fontWeight: 700 }}>
           Interview
         </Typography>
@@ -74,7 +74,14 @@ export function InterviewPageContent({ fileName, token }) {
             {interviewTitle}
           </Typography>
         ) : null}
-        <Typography component="h1" sx={{ fontSize: "2.5rem", mb: 2 }}>
+        <Typography
+          component="h1"
+          sx={{
+            fontSize: { xs: "1.9rem", md: "2.2rem" },
+            lineHeight: 1.15,
+            mb: 1.5,
+          }}
+        >
           {completed
             ? "Thank you. Your interview has been submitted!"
             : "Your interview request is ready."}
@@ -84,7 +91,7 @@ export function InterviewPageContent({ fileName, token }) {
             ? "Your answers have been uploaded and shared with the interviewer."
             : ""}
         </Typography>
-        <Box sx={{ mt: 4 }}>
+        <Box sx={{ mt: 2.5 }}>
           {unsupportedDevice ? (
             <Alert severity="warning">
               This video assessment must be completed on a laptop or desktop

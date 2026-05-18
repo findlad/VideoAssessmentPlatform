@@ -12,6 +12,30 @@ function normalizeEmail(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 
+function isSelfSignupEnabled() {
+  return process.env.ALLOW_ADMIN_SELF_SIGNUP === "true";
+}
+
+async function grantAdminAccess(userRef, decodedToken, email, source) {
+  await userRef.set(
+    {
+      email,
+      lastLoginAt: FieldValue.serverTimestamp(),
+      role: "admin",
+      source,
+      uid: decodedToken.uid,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  return {
+    email,
+    role: "admin",
+    uid: decodedToken.uid,
+  };
+}
+
 export async function requireAdminUser(request) {
   const token = getBearerToken(request);
 
@@ -28,6 +52,10 @@ export async function requireAdminUser(request) {
 
   if (userSnapshot.exists) {
     const userData = userSnapshot.data();
+
+    if (userData?.revokedAt) {
+      return null;
+    }
 
     if (userData?.role === "admin" && !userData?.revokedAt) {
       await userRef.set(
@@ -46,25 +74,33 @@ export async function requireAdminUser(request) {
       };
     }
 
+    if (email && isSelfSignupEnabled()) {
+      return grantAdminAccess(
+        userRef,
+        decodedToken,
+        email,
+        "self-signup-upgrade",
+      );
+    }
+
     return null;
   }
 
-  if (initialAdminEmail && email && email === initialAdminEmail) {
+  if (
+    email &&
+    (isSelfSignupEnabled() || (initialAdminEmail && email === initialAdminEmail))
+  ) {
     await userRef.set({
       createdAt: FieldValue.serverTimestamp(),
       email,
-      lastLoginAt: FieldValue.serverTimestamp(),
-      role: "admin",
-      source: "initial-admin-bootstrap",
-      uid: decodedToken.uid,
-      updatedAt: FieldValue.serverTimestamp(),
     });
 
-    return {
+    return grantAdminAccess(
+      userRef,
+      decodedToken,
       email,
-      role: "admin",
-      uid: decodedToken.uid,
-    };
+      isSelfSignupEnabled() ? "self-signup" : "initial-admin-bootstrap",
+    );
   }
 
   return null;

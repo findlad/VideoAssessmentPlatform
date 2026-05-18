@@ -702,7 +702,7 @@ export function InterviewQuestions({
 
   if (!landingAccepted) {
     return (
-      <Stack spacing={3}>
+      <Stack spacing={2}>
         <Typography sx={{ color: "#657085" }}>
           Hello {request.candidateName || request.intervieweeName || "there"}.
           You will answer {questionCount} question
@@ -735,7 +735,7 @@ export function InterviewQuestions({
 
   if (!deviceReady) {
     return (
-      <Stack spacing={3}>
+      <Stack spacing={2}>
         <Alert severity="info">
           Before you begin, confirm your camera and microphone are working.
           Questions will remain hidden until you start each recording.
@@ -744,7 +744,7 @@ export function InterviewQuestions({
           sx={{
             bgcolor: "#0f172a",
             borderRadius: 2,
-            minHeight: 260,
+            minHeight: { xs: 220, md: 240 },
             overflow: "hidden",
           }}
         >
@@ -756,7 +756,7 @@ export function InterviewQuestions({
             playsInline
             sx={{
               display: cameraPreviewReady ? "block" : "none",
-              minHeight: 260,
+              minHeight: { xs: 220, md: 240 },
               objectFit: "cover",
               width: "100%",
             }}
@@ -819,7 +819,7 @@ export function InterviewQuestions({
   }
 
   return (
-    <Stack spacing={3}>
+    <Stack spacing={2}>
       {error ? <Alert severity="error">{error}</Alert> : null}
       {recoveredDraft ? (
         <Alert severity="info">
@@ -834,7 +834,7 @@ export function InterviewQuestions({
         <LinearProgress
           variant="determinate"
           value={progressValue}
-          sx={{ mb: 3 }}
+          sx={{ mb: 2 }}
         />
         <Typography sx={{ color: "#657085" }}>
           {currentQuestion
@@ -842,7 +842,10 @@ export function InterviewQuestions({
             : "The question will appear when recording starts."}
         </Typography>
         {currentQuestion ? (
-          <Typography component="h2" sx={{ fontSize: "1.5rem", mb: 1 }}>
+          <Typography
+            component="h2"
+            sx={{ fontSize: { xs: "1.2rem", md: "1.35rem" }, mb: 1 }}
+          >
             {currentQuestion.question}
           </Typography>
         ) : null}
@@ -852,7 +855,7 @@ export function InterviewQuestions({
         sx={{
           bgcolor: "#0f172a",
           borderRadius: 2,
-          minHeight: 260,
+          minHeight: { xs: 220, md: 240 },
           overflow: "hidden",
           position: "relative",
         }}
@@ -865,7 +868,7 @@ export function InterviewQuestions({
           playsInline
           sx={{
             display: "block",
-            minHeight: 260,
+            minHeight: { xs: 220, md: 240 },
             objectFit: "cover",
             width: "100%",
           }}
@@ -879,8 +882,8 @@ export function InterviewQuestions({
               color: "#e5e7eb",
               inset: 0,
               justifyContent: "center",
-              minHeight: 260,
-              p: 3,
+              minHeight: { xs: 220, md: 240 },
+              p: 2,
               position: "absolute",
               textAlign: "center",
             }}
