@@ -21,7 +21,7 @@ env:
     value: "videoassessmentplatform"
 
   - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-    value: "videoassessmentplatform.appspot.com"
+    value: "videoassessmentplatform.firebasestorage.app"
 
   - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
     value: "162889759838"

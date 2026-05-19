@@ -9,6 +9,7 @@ const DEFAULT_ATTEMPTS_ALLOWED = 1;
 const DEFAULT_MAX_DURATION_SECONDS = 60;
 const MAX_DURATION_SECONDS = 300;
 const LINK_EXPIRY_DAYS = Number(process.env.ASSESSMENT_LINK_EXPIRY_DAYS || 7);
+const INTERVIEW_LINK_LABEL = "Start Video Interview";
 const senderEmail = process.env.NEXT_PUBLIC_EMAIL_FROM_ADDRESS;
 
 function createAccessToken() {
@@ -165,7 +166,7 @@ export async function POST(request) {
     const emailLines = [
       `Hello ${intervieweeName},`,
       `You have received an interview request for ${interviewTitle} from ${requesterName}. ${requesterName} has posed a series of questions. Once you have tested and granted permission to use your camera and microphone, you will see the first question and we will record your answer. The interviewer may allow multiple attempts, but the default is one. This link expires on ${expiresAt.toLocaleDateString()}. When you are ready to start your video interview, please click the link:`,
-      interviewLink,
+      `${INTERVIEW_LINK_LABEL}: ${interviewLink}`,
     ];
     const mailRequest = {
       to: [targetEmail],
@@ -189,7 +190,7 @@ export async function POST(request) {
           .map((line) => paragraphToHtml(line))
           .join(
             "",
-          )}<p><a href="${safeInterviewLink}">${safeInterviewLink}</a></p>`,
+          )}<p><a href="${safeInterviewLink}">${INTERVIEW_LINK_LABEL}</a></p>`,
       },
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

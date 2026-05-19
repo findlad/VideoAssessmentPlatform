@@ -15,6 +15,7 @@ const LINK_EXPIRY_DAYS = Number(process.env.ASSESSMENT_LINK_EXPIRY_DAYS || 7);
 const DUPLICATE_WINDOW_SECONDS = Number(
   process.env.INTAKE_DUPLICATE_WINDOW_SECONDS || 300,
 );
+const INTERVIEW_LINK_LABEL = "Start Video Interview";
 const senderEmail = process.env.NEXT_PUBLIC_EMAIL_FROM_ADDRESS;
 
 function jsonError(status, code, message, details = undefined) {
@@ -311,13 +312,13 @@ export async function POST(request) {
       },
       message: {
         subject: `${payload.assessment.title} interview request`,
-        text: `Hello ${payload.candidate.name},\n\nYou have received an interview request for ${payload.assessment.title}. You will answer ${payload.assessment.questions.length} question${payload.assessment.questions.length === 1 ? "" : "s"} one at a time. This link expires on ${expiresAt.toLocaleDateString()}. When you are ready to start, please use this link:\n\n${assessmentLink}`,
+        text: `Hello ${payload.candidate.name},\n\nYou have received an interview request for ${payload.assessment.title}. You will answer ${payload.assessment.questions.length} question${payload.assessment.questions.length === 1 ? "" : "s"} one at a time. This link expires on ${expiresAt.toLocaleDateString()}. When you are ready to start, please use this link:\n\n${INTERVIEW_LINK_LABEL}: ${assessmentLink}`,
         html: `<p>Hello ${safeCandidateName},</p>
         <p>You have received an interview request for <strong>${safeAssessmentTitle}</strong>.</p>
         <p>You will answer ${payload.assessment.questions.length} question${payload.assessment.questions.length === 1 ? "" : "s"} one at a time.</p>
         <p>This link expires on ${escapeHtml(expiresAt.toLocaleDateString())}.</p>
         <p>When you are ready to start, please use this link:</p>
-        <p><a href="${safeAssessmentLink}">Start Video Assessment</a></p>`,
+        <p><a href="${safeAssessmentLink}">${INTERVIEW_LINK_LABEL}</a></p>`,
       },
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),

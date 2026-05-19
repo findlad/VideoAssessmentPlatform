@@ -337,6 +337,13 @@ Deploy security rules after changing Firestore or Storage rules:
 firebase deploy --only firestore:rules,storage
 ```
 
+Apply the Storage bucket CORS policy when browser uploads or downloads are
+blocked by preflight errors:
+
+```bash
+gcloud storage buckets update gs://videoassessmentplatform.firebasestorage.app --cors-file=storage.cors.json
+```
+
 Deploy the app through App Hosting after the backend is configured:
 
 ```bash
